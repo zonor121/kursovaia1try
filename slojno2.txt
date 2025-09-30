@@ -1,0 +1,12 @@
+# Граф с отрицательными весами
+A B 4
+A C 2
+B C -3
+B D 1
+C D 2
+C E 3
+D E -1
+D F 2
+E F 1
+START A
+END F
