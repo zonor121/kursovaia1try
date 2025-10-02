@@ -3,7 +3,6 @@ from tkinter import ttk, filedialog, messagebox
 import math
 import heapq
 from collections import deque
-import os
 
 class GraphVisualizerTkinter:
     def __init__(self):
@@ -82,6 +81,7 @@ class GraphVisualizerTkinter:
         self.pause = True
         self.algorithm_finished = False
         self.auto_animation_id = None
+        self.algorithm_result = ""
         
         # Инициализация стандартного графа
         self.initialize_default_graph()
@@ -210,32 +210,6 @@ class GraphVisualizerTkinter:
         self.start_node = 'G'
         self.end_node = 'D'
     
-    def show_file_format_help(self):
-        """Показывает справку по формату файла"""
-        help_text = """Формат файла графа:
-
-Каждая строка может быть:
-1. Ребро: A B 5       (узел A, узел B, вес 5)
-2. Старт: START A     (начальный узел A)
-3. Финиш: END B       (конечный узел B)
-4. Комментарий: # это комментарий
-
-Пример:
-# Простой граф
-A B 4
-B C 3
-C D 5
-D E 2
-START A
-END D
-
-Примечания:
-- Веса могут быть дробными и отрицательными
-- Если START/END не указаны, берутся первый/последний узлы
-- Файл должен быть в кодировке UTF-8"""
-        
-        messagebox.showinfo("Формат файла графа", help_text)
-    
     def change_speed(self, speed_name, delay_ms):
         """Изменяет скорость анимации"""
         self.current_speed_delay = delay_ms
@@ -257,6 +231,7 @@ END D
         self.current_node = None
         self.final_path = None
         self.algorithm_finished = False
+        self.algorithm_result = ""
         
         if self.algorithm_var.get() == "dijkstra" and hasattr(self, 'start_node'):
             self.pq = [(0, self.start_node)]
@@ -294,7 +269,8 @@ END D
             'previous': self.previous.copy(),
             'description': description,
             'final_path': self.final_path.copy() if self.final_path else None,
-            'algorithm_finished': self.algorithm_finished
+            'algorithm_finished': self.algorithm_finished,
+            'algorithm_result': self.algorithm_result
         }
         if hasattr(self, 'iteration'):
             state['iteration'] = self.iteration
@@ -313,6 +289,7 @@ END D
             self.previous = state['previous'].copy()
             self.final_path = state['final_path'].copy() if state['final_path'] else None
             self.algorithm_finished = state['algorithm_finished']
+            self.algorithm_result = state['algorithm_result']
             self.current_history_index = index
             
             if 'iteration' in state:
@@ -367,6 +344,7 @@ END D
                 u, v, weight = self.edges[self.edge_index]
                 if self.distances[u] != float('inf') and self.distances[u] + weight < self.distances[v]:
                     self.algorithm_finished = True
+                    self.algorithm_result = f"Обнаружен отрицательный цикл! {u}→{v}"
                     self.save_state(f"Обнаружен отрицательный цикл! {u}→{v}")
                     return False
                 self.edge_index += 1
@@ -401,11 +379,13 @@ END D
         """Восстанавливает кратчайший путь"""
         if not hasattr(self, 'end_node') or not hasattr(self, 'start_node'):
             self.final_path = None
+            self.algorithm_result = "Старт или финиш не установлены"
             self.save_state("Старт или финиш не установлены")
             return
             
         if self.end_node not in self.previous or self.distances[self.end_node] == float('inf'):
             self.final_path = None
+            self.algorithm_result = f"Путь от {self.start_node} до {self.end_node} не найден"
             self.save_state(f"Путь от {self.start_node} до {self.end_node} не найден")
         else:
             path = []
@@ -416,7 +396,9 @@ END D
             path.append(self.start_node)
             path.reverse()
             self.final_path = path
-            self.save_state(f"Найден путь: {' → '.join(path)} (длина: {self.distances[self.end_node]})")
+            path_length = self.distances[self.end_node]
+            self.algorithm_result = f"Найден путь: {' → '.join(path)} (длина: {path_length})"
+            self.save_state(f"Найден путь: {' → '.join(path)} (длина: {path_length})")
     
     def algorithm_step(self):
         """Выполняет один шаг текущего алгоритма"""
@@ -507,7 +489,10 @@ END D
         self.draw_legend()
         
         # Обновляем статус
-        if self.current_history_index >= 0 and self.history:
+        if self.algorithm_finished and self.algorithm_result:
+            # Показываем финальный результат
+            status_text = f"✅ {self.algorithm_result}"
+        elif self.current_history_index >= 0 and self.history:
             current_state = self.history[self.current_history_index]
             status_text = f"{current_state['description']} | Шаг {self.current_history_index + 1}/{len(self.history)}"
             if hasattr(self, 'iteration'):
@@ -515,10 +500,10 @@ END D
             
             if self.pause and not self.algorithm_finished:
                 status_text += " | ⏸️ ПАУЗА"
-            elif self.algorithm_finished:
-                status_text += " | ✅ ЗАВЕРШЕНО"
-            
-            self.status_var.set(status_text)
+        else:
+            status_text = "⏸️ Программа запущена в режиме паузы"
+        
+        self.status_var.set(status_text)
     
     def draw_legend(self):
         """Рисует легенду на холсте"""
@@ -545,10 +530,17 @@ END D
             speed_text = f"Скорость: {self.speed_var.get()} ({self.current_speed_delay}мс/шаг)"
             self.canvas.create_text(legend_x, legend_y + 50, text=speed_text, anchor=tk.W, font=('Arial', 9))
             
-            state_info = "⏸️ ПАУЗА" if self.pause else "▶️ ВЫПОЛНЕНИЕ"
-            if self.algorithm_finished:
-                state_info = "✅ ЗАВЕРШЕНО"
-            self.canvas.create_text(legend_x, legend_y + 70, text=f"Состояние: {state_info}", anchor=tk.W, font=('Arial', 10, 'bold'))
+            # Информация о состоянии
+            if self.algorithm_finished and self.algorithm_result:
+                # Показываем сокращенный результат на графе
+                if "Найден путь" in self.algorithm_result:
+                    result_line = self.algorithm_result.split("(")[0]  # Берем только часть до длины
+                    self.canvas.create_text(legend_x, legend_y + 70, text=f"✅ {result_line}", anchor=tk.W, font=('Arial', 9, 'bold'))
+                else:
+                    self.canvas.create_text(legend_x, legend_y + 70, text=f"❌ {self.algorithm_result}", anchor=tk.W, font=('Arial', 9, 'bold'))
+            else:
+                state_info = "⏸️ ПАУЗА" if self.pause else "▶️ ВЫПОЛНЕНИЕ"
+                self.canvas.create_text(legend_x, legend_y + 70, text=f"Состояние: {state_info}", anchor=tk.W, font=('Arial', 10, 'bold'))
     
     def step_forward(self):
         """Шаг вперед в алгоритме"""
@@ -573,7 +565,10 @@ END D
                 self.root.after_cancel(self.auto_animation_id)
                 self.auto_animation_id = None
             self.pause_btn.config(text="▶️ Продолжить")
-            self.status_var.set("⏸️ Пауза - используйте кнопки для пошагового выполнения")
+            if self.algorithm_finished and self.algorithm_result:
+                self.status_var.set(f"✅ {self.algorithm_result}")
+            else:
+                self.status_var.set("⏸️ Пауза - используйте кнопки для пошагового выполнения")
         else:
             self.pause_btn.config(text="⏸️ Пауза")
             self.status_var.set("▶️ Выполнение алгоритма...")
@@ -599,7 +594,11 @@ END D
         elif not self.pause and self.algorithm_finished:
             self.pause = True
             self.pause_btn.config(text="▶️ Продолжить")
-            self.status_var.set("✅ Алгоритм завершен!")
+            # Показываем результат алгоритма в статусе
+            if self.algorithm_result:
+                self.status_var.set(f"✅ {self.algorithm_result}")
+            else:
+                self.status_var.set("✅ Алгоритм завершен!")
     
     def run(self):
         """Запуск приложения"""
