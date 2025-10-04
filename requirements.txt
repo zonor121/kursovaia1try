@@ -1,0 +1,3 @@
+# Все используемые библиотеки входят в стандартную поставку Python
+# tkinter, ttk, filedialog, messagebox, math, heapq, collections
+# Требуется Python 3.6+

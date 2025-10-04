@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import math
 import heapq
+from collections import deque
 
 class GraphVisualizerTkinter:
     def __init__(self):
@@ -22,11 +23,11 @@ class GraphVisualizerTkinter:
         self.pan_offset_y = 0
         self.is_panning = False
         
-        # Привязка событий мыши
-        self.canvas.bind("<MouseWheel>", self.zoom)
-        self.canvas.bind("<Button-4>", self.zoom)
-        self.canvas.bind("<Button-5>", self.zoom)
-        self.canvas.bind("<ButtonPress-2>", self.start_pan)
+        # Привязка событий мыши для масштабирования и панорамирования
+        self.canvas.bind("<MouseWheel>", self.zoom)  # Windows/Mac
+        self.canvas.bind("<Button-4>", self.zoom)    # Linux scroll up
+        self.canvas.bind("<Button-5>", self.zoom)    # Linux scroll down
+        self.canvas.bind("<ButtonPress-2>", self.start_pan)  # Средняя кнопка мыши для панорамирования
         self.canvas.bind("<B2-Motion>", self.pan)
         self.canvas.bind("<ButtonRelease-2>", self.end_pan)
         
@@ -46,6 +47,7 @@ class GraphVisualizerTkinter:
         self.restart_btn = ttk.Button(self.control_frame, text="🔄 Перезапуск", command=self.restart)
         self.restart_btn.pack(side=tk.LEFT, padx=5)
         
+        # Кнопка загрузки графа
         self.load_graph_btn = ttk.Button(self.control_frame, text="📁 Загрузить граф", command=self.load_graph_from_file)
         self.load_graph_btn.pack(side=tk.LEFT, padx=5)
         
@@ -98,10 +100,10 @@ class GraphVisualizerTkinter:
         self.status_label = ttk.Label(self.root, textvariable=self.status_var, font=('Arial', 12))
         self.status_label.pack(pady=5)
         
-        # Данные графа
+        # Данные графа и состояния алгоритма
         self.graph = {}
         self.positions = {}
-        self.original_positions = {}
+        self.original_positions = {}  # Сохраняем оригинальные позиции для сброса масштаба
         self.history = []
         self.current_history_index = -1
         self.pause = True
@@ -109,31 +111,44 @@ class GraphVisualizerTkinter:
         self.auto_animation_id = None
         self.algorithm_result = ""
         
-        # Инициализация
+        # Инициализация стандартного графа
         self.initialize_default_graph()
         self.initialize_algorithm()
     
     def zoom(self, event):
-        if event.delta > 0 or event.num == 4:
+        """Масштабирование с помощью колесика мыши"""
+        if event.delta > 0 or event.num == 4:  # Приближение
             self.zoom_level *= self.zoom_factor
-        else:
+        else:  # Отдаление
             self.zoom_level /= self.zoom_factor
         
+        # Ограничиваем масштаб
         self.zoom_level = max(0.1, min(5.0, self.zoom_level))
+        
+        # Перерисовываем граф с новым масштабом
         self.draw_graph()
+        
+        # Обновляем статус
         self.status_var.set(f"Масштаб: {self.zoom_level:.1%}")
     
     def zoom_manual(self, direction):
-        if direction > 0:
+        """Масштабирование с помощью кнопок"""
+        if direction > 0:  # Приближение
             self.zoom_level *= self.zoom_factor
-        else:
+        else:  # Отдаление
             self.zoom_level /= self.zoom_factor
         
+        # Ограничиваем масштаб
         self.zoom_level = max(0.1, min(5.0, self.zoom_level))
+        
+        # Перерисовываем граф с новым масштабом
         self.draw_graph()
+        
+        # Обновляем статус
         self.status_var.set(f"Масштаб: {self.zoom_level:.1%}")
     
     def reset_view(self):
+        """Сброс масштаба и положения"""
         self.zoom_level = 1.0
         self.pan_offset_x = 0
         self.pan_offset_y = 0
@@ -141,11 +156,13 @@ class GraphVisualizerTkinter:
         self.status_var.set("Вид сброшен")
     
     def start_pan(self, event):
+        """Начало панорамирования"""
         self.is_panning = True
         self.pan_start_x = event.x
         self.pan_start_y = event.y
     
     def pan(self, event):
+        """Панорамирование"""
         if self.is_panning:
             dx = event.x - self.pan_start_x
             dy = event.y - self.pan_start_y
@@ -156,18 +173,28 @@ class GraphVisualizerTkinter:
             self.draw_graph()
     
     def end_pan(self, event):
+        """Конец панорамирования"""
         self.is_panning = False
     
     def get_transformed_position(self, x, y):
+        """Получает трансформированные координаты с учетом масштаба и панорамирования"""
+        # Центр холста
         center_x, center_y = 500, 300
+        
+        # Применяем масштаб и смещение
         transformed_x = center_x + (x - center_x + self.pan_offset_x) * self.zoom_level
         transformed_y = center_y + (y - center_y + self.pan_offset_y) * self.zoom_level
+        
         return transformed_x, transformed_y
     
     def load_graph_from_file(self):
+        """Загружает граф из файла"""
         file_path = filedialog.askopenfilename(
             title="Выберите файл с графом",
-            filetypes=[("Текстовые файлы", "*.txt"), ("Все файлы", "*.*")]
+            filetypes=[
+                ("Текстовые файлы", "*.txt"),
+                ("Все файлы", "*.*")
+            ]
         )
         
         if not file_path:
@@ -177,6 +204,7 @@ class GraphVisualizerTkinter:
             with open(file_path, 'r', encoding='utf-8') as file:
                 lines = file.readlines()
             
+            # Парсинг файла
             edges = []
             start_node = None
             end_node = None
@@ -186,6 +214,7 @@ class GraphVisualizerTkinter:
                 if not line or line.startswith('#'):
                     continue
                 
+                # Обработка START и END команд
                 if line.upper().startswith('START'):
                     start_node = line.split()[1]
                     continue
@@ -193,6 +222,7 @@ class GraphVisualizerTkinter:
                     end_node = line.split()[1]
                     continue
                 
+                # Обработка ребер (формат: A B 5)
                 parts = line.split()
                 if len(parts) >= 3:
                     u, v = parts[0], parts[1]
@@ -206,15 +236,23 @@ class GraphVisualizerTkinter:
                 messagebox.showerror("Ошибка", "Файл не содержит корректных ребер графа")
                 return
             
+            # Создаем граф
             self.graph = {}
             for u, v, weight in edges:
                 self.graph[(u, v)] = weight
-                self.graph[(v, u)] = weight
+                self.graph[(v, u)] = weight  # Делаем неориентированным
             
+            # Автоматическая расстановка позиций
             self.calculate_positions()
+            
+            # Устанавливаем старт и финиш
             self.start_node = start_node if start_node else list(self.positions.keys())[0]
             self.end_node = end_node if end_node else list(self.positions.keys())[-1]
+            
+            # Сохраняем оригинальные позиции
             self.original_positions = self.positions.copy()
+            
+            # Переинициализируем алгоритм
             self.restart()
             
             messagebox.showinfo("Успех", f"Граф загружен!\nРебер: {len(edges)}\nУзлов: {len(self.positions)}\nСтарт: {self.start_node}, Конец: {self.end_node}")
@@ -223,11 +261,12 @@ class GraphVisualizerTkinter:
             messagebox.showerror("Ошибка", f"Не удалось загрузить файл:\n{str(e)}")
     
     def calculate_positions(self):
+        """Автоматически расставляет позиции узлов на холсте"""
         nodes = list(set([node for edge in self.graph.keys() for node in edge]))
         self.positions = {}
         
         center_x, center_y = 500, 300
-        radius = min(400, 50 * len(nodes))
+        radius = min(400, 50 * len(nodes))  # Автоматический радиус
         
         for i, node in enumerate(nodes):
             angle = 2 * math.pi * i / len(nodes)
@@ -236,9 +275,11 @@ class GraphVisualizerTkinter:
                 center_y + radius * math.sin(angle)
             )
         
+        # Сохраняем оригинальные позиции
         self.original_positions = self.positions.copy()
     
     def initialize_default_graph(self):
+        """Инициализация стандартного графа по умолчанию"""
         edges = [
             ('A', 'B', 4), ('B', 'C', 3), ('C', 'D', 5), 
             ('D', 'E', 2), ('E', 'F', 6), ('F', 'A', 4),
@@ -253,6 +294,7 @@ class GraphVisualizerTkinter:
             self.graph[(u, v)] = weight
             self.graph[(v, u)] = weight
         
+        # Позиции узлов
         center_x, center_y = 500, 300
         
         inner_nodes = ['A', 'B', 'C', 'D', 'E', 'F']
@@ -273,9 +315,12 @@ class GraphVisualizerTkinter:
         
         self.start_node = 'G'
         self.end_node = 'D'
+        
+        # Сохраняем оригинальные позиции
         self.original_positions = self.positions.copy()
     
     def change_speed(self, speed_name, delay_ms):
+        """Изменяет скорость анимации"""
         self.current_speed_delay = delay_ms
         self.status_var.set(f"Скорость изменена на: {speed_name} ({delay_ms}мс/шаг)")
         
@@ -285,6 +330,8 @@ class GraphVisualizerTkinter:
             self.auto_animate()
     
     def initialize_algorithm(self):
+        """Инициализация алгоритма"""
+        # Состояние алгоритма
         self.distances = {node: float('inf') for node in self.positions}
         if hasattr(self, 'start_node'):
             self.distances[self.start_node] = 0
@@ -306,12 +353,14 @@ class GraphVisualizerTkinter:
         self.save_state("Начальное состояние")
     
     def get_edges_list(self):
+        """Преобразует граф в список ребер для Беллмана-Форда"""
         edges = []
         for (u, v), weight in self.graph.items():
             edges.append((u, v, weight))
         return edges
     
     def get_neighbors(self, node):
+        """Получает всех соседей узла"""
         neighbors = {}
         for (u, v), weight in self.graph.items():
             if u == node:
@@ -321,6 +370,7 @@ class GraphVisualizerTkinter:
         return neighbors
     
     def save_state(self, description):
+        """Сохраняет текущее состояние в историю"""
         state = {
             'distances': self.distances.copy(),
             'visited': self.visited.copy(),
@@ -339,6 +389,7 @@ class GraphVisualizerTkinter:
         self.current_history_index = len(self.history) - 1
     
     def load_state(self, index):
+        """Загружает состояние из истории"""
         if 0 <= index < len(self.history):
             state = self.history[index]
             self.distances = state['distances'].copy()
@@ -357,6 +408,7 @@ class GraphVisualizerTkinter:
         return False
     
     def dijkstra_step(self):
+        """Выполняет один шаг алгоритма Дейкстры"""
         if not hasattr(self, 'pq') or not self.pq:
             self.algorithm_finished = True
             self.reconstruct_path()
@@ -392,6 +444,7 @@ class GraphVisualizerTkinter:
         return True
     
     def bellman_ford_step(self):
+        """Выполняет один шаг алгоритма Беллмана-Форда"""
         if not hasattr(self, 'edges'):
             return False
             
@@ -432,6 +485,7 @@ class GraphVisualizerTkinter:
         return True
     
     def reconstruct_path(self):
+        """Восстанавливает кратчайший путь"""
         if not hasattr(self, 'end_node') or not hasattr(self, 'start_node'):
             self.final_path = None
             self.algorithm_result = "Старт или финиш не установлены"
@@ -456,6 +510,7 @@ class GraphVisualizerTkinter:
             self.save_state(f"Найден путь: {' → '.join(path)} (длина: {path_length})")
     
     def algorithm_step(self):
+        """Выполняет один шаг текущего алгоритма"""
         if not hasattr(self, 'start_node'):
             messagebox.showwarning("Предупреждение", "Сначала загрузите граф и установите стартовый узел")
             return False
@@ -466,6 +521,7 @@ class GraphVisualizerTkinter:
             return self.bellman_ford_step()
     
     def draw_graph(self):
+        """Рисует граф на холсте с текущим состоянием алгоритма"""
         self.canvas.delete("all")
         
         if not self.graph:
@@ -476,11 +532,12 @@ class GraphVisualizerTkinter:
         # Рисуем ребра
         for (u, v), weight in self.graph.items():
             if u in self.positions and v in self.positions:
+                # Получаем трансформированные координаты
                 x1, y1 = self.get_transformed_position(*self.positions[u])
                 x2, y2 = self.get_transformed_position(*self.positions[v])
                 
                 edge_color = "gray"
-                edge_width = max(1, int(2 * self.zoom_level))
+                edge_width = max(1, int(2 * self.zoom_level))  # Масштабируем ширину линии
                 
                 if self.final_path and u in self.final_path and v in self.final_path:
                     try:
@@ -497,7 +554,9 @@ class GraphVisualizerTkinter:
                 offset_x = (y2 - y1) * 0.1
                 offset_y = -(x2 - x1) * 0.1
                 
+                # Масштабируем размер шрифта
                 font_size = max(8, int(10 * self.zoom_level))
+                
                 self.canvas.create_text(
                     mid_x + offset_x, mid_y + offset_y,
                     text=str(weight), fill="darkblue",
@@ -506,6 +565,7 @@ class GraphVisualizerTkinter:
         
         # Рисуем узлы
         for node, (orig_x, orig_y) in self.positions.items():
+            # Получаем трансформированные координаты
             x, y = self.get_transformed_position(orig_x, orig_y)
             
             if node == self.current_node:
@@ -517,12 +577,13 @@ class GraphVisualizerTkinter:
             else:
                 fill_color = "lightgray"
             
+            # Особые цвета для старта и финиша
             if hasattr(self, 'start_node') and node == self.start_node:
                 fill_color = "orange"
             if hasattr(self, 'end_node') and node == self.end_node:
                 fill_color = "purple"
             
-            node_radius = max(15, int(20 * self.zoom_level))
+            node_radius = max(15, int(20 * self.zoom_level))  # Масштабируем радиус узла
             self.canvas.create_oval(
                 x - node_radius, y - node_radius,
                 x + node_radius, y + node_radius,
@@ -531,6 +592,7 @@ class GraphVisualizerTkinter:
             
             text_color = "white" if fill_color in ["red", "green", "blue", "orange", "purple"] else "black"
             font_size = max(8, int(12 * self.zoom_level))
+            
             self.canvas.create_text(x, y, text=node, fill=text_color, font=('Arial', font_size, 'bold'))
             
             if node in self.distances and self.distances[node] != float('inf'):
@@ -547,6 +609,7 @@ class GraphVisualizerTkinter:
         
         # Обновляем статус
         if self.algorithm_finished and self.algorithm_result:
+            # Показываем финальный результат
             status_text = f"✅ {self.algorithm_result}"
         elif self.current_history_index >= 0 and self.history:
             current_state = self.history[self.current_history_index]
@@ -559,12 +622,14 @@ class GraphVisualizerTkinter:
         else:
             status_text = "⏸️ Программа запущена в режиме паузы"
         
+        # Добавляем информацию о масштабе
         if abs(self.zoom_level - 1.0) > 0.01 or self.pan_offset_x != 0 or self.pan_offset_y != 0:
             status_text += f" | Масштаб: {self.zoom_level:.1%}"
         
         self.status_var.set(status_text)
     
     def draw_legend(self):
+        """Рисует легенду на холсте"""
         legend_x, legend_y = 20, 20
         legend_items = [
             ("Текущий узел", "red"),
@@ -588,26 +653,24 @@ class GraphVisualizerTkinter:
             speed_text = f"Скорость: {self.speed_var.get()} ({self.current_speed_delay}мс/шаг)"
             self.canvas.create_text(legend_x, legend_y + 50, text=speed_text, anchor=tk.W, font=('Arial', 9))
             
+            # Информация о масштабе
+            scale_text = f"Масштаб: {self.zoom_level:.1%}"
+            self.canvas.create_text(legend_x, legend_y + 70, text=scale_text, anchor=tk.W, font=('Arial', 9))
+            
+            # Информация о состоянии
             if self.algorithm_finished and self.algorithm_result:
+                # Показываем сокращенный результат на графе
                 if "Найден путь" in self.algorithm_result:
-                    result_line = self.algorithm_result.split("(")[0]
-                    self.canvas.create_text(legend_x, legend_y + 70, text=f"✅ {result_line}", anchor=tk.W, font=('Arial', 9, 'bold'))
+                    result_line = self.algorithm_result.split("(")[0]  # Берем только часть до длины
+                    self.canvas.create_text(legend_x, legend_y + 90, text=f"✅ {result_line}", anchor=tk.W, font=('Arial', 9, 'bold'))
                 else:
-                    self.canvas.create_text(legend_x, legend_y + 70, text=f"❌ {self.algorithm_result}", anchor=tk.W, font=('Arial', 9, 'bold'))
+                    self.canvas.create_text(legend_x, legend_y + 90, text=f"❌ {self.algorithm_result}", anchor=tk.W, font=('Arial', 9, 'bold'))
             else:
                 state_info = "⏸️ ПАУЗА" if self.pause else "▶️ ВЫПОЛНЕНИЕ"
-                self.canvas.create_text(legend_x, legend_y + 70, text=f"Состояние: {state_info}", anchor=tk.W, font=('Arial', 10, 'bold'))
-        
-        # Информация о масштабе внизу
-        scale_y = 580
-        scale_text = f"Масштаб: {self.zoom_level:.1%}"
-        self.canvas.create_text(legend_x, scale_y, text=scale_text, anchor=tk.W, font=('Arial', 10, 'bold'), fill="darkblue")
-        
-        if self.pan_offset_x != 0 or self.pan_offset_y != 0:
-            pan_text = f"Смещение: ({self.pan_offset_x:.0f}, {self.pan_offset_y:.0f})"
-            self.canvas.create_text(legend_x + 120, scale_y, text=pan_text, anchor=tk.W, font=('Arial', 10), fill="darkblue")
+                self.canvas.create_text(legend_x, legend_y + 90, text=f"Состояние: {state_info}", anchor=tk.W, font=('Arial', 10, 'bold'))
     
     def step_forward(self):
+        """Шаг вперед в алгоритме"""
         if not self.algorithm_finished:
             if self.algorithm_step():
                 self.draw_graph()
@@ -615,11 +678,13 @@ class GraphVisualizerTkinter:
                 self.draw_graph()
     
     def step_backward(self):
+        """Шаг назад"""
         if self.current_history_index > 0:
             if self.load_state(self.current_history_index - 1):
                 self.draw_graph()
     
     def toggle_pause(self):
+        """Переключение паузы"""
         self.pause = not self.pause
         
         if self.pause:
@@ -637,6 +702,7 @@ class GraphVisualizerTkinter:
             self.auto_animate()
     
     def restart(self):
+        """Перезапуск алгоритма"""
         if self.auto_animation_id:
             self.root.after_cancel(self.auto_animation_id)
             self.auto_animation_id = None
@@ -648,22 +714,26 @@ class GraphVisualizerTkinter:
         self.draw_graph()
     
     def auto_animate(self):
+        """Автоматическая анимация с учетом выбранной скорости"""
         if not self.pause and not self.algorithm_finished:
             self.step_forward()
             self.auto_animation_id = self.root.after(self.current_speed_delay, self.auto_animate)
         elif not self.pause and self.algorithm_finished:
             self.pause = True
             self.pause_btn.config(text="▶️ Продолжить")
+            # Показываем результат алгоритма в статусе
             if self.algorithm_result:
                 self.status_var.set(f"✅ {self.algorithm_result}")
             else:
                 self.status_var.set("✅ Алгоритм завершен!")
     
     def run(self):
+        """Запуск приложения"""
         self.draw_graph()
         self.status_var.set("⏸️ Программа запущена в режиме паузы. Нажмите 'Загрузить граф' или 'Продолжить'")
         self.root.mainloop()
 
+# Запуск приложения
 if __name__ == "__main__":
     app = GraphVisualizerTkinter()
     print("Tkinter визуализатор алгоритмов запущен!")
