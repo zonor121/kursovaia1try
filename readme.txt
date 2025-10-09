@@ -5,3 +5,5 @@
 Обёртка в .exe:
 pip install pyinstaller
 pyinstaller --onefile --windowed --name "GraphVisualizer" tkitnkert.py
+
+python -m PyInstaller --onefile --windowed tkitnkert.py (Если не видит библиотеку)
