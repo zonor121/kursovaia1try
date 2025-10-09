@@ -121,7 +121,6 @@ class GraphVisualizerTkinter:
         
         self.zoom_level = max(0.1, min(5.0, self.zoom_level))
         self.draw_graph()
-        self.status_var.set(f"Масштаб: {self.zoom_level:.1%}")
     
     def zoom_manual(self, direction):
         if direction > 0:
@@ -131,14 +130,12 @@ class GraphVisualizerTkinter:
         
         self.zoom_level = max(0.1, min(5.0, self.zoom_level))
         self.draw_graph()
-        self.status_var.set(f"Масштаб: {self.zoom_level:.1%}")
     
     def reset_view(self):
         self.zoom_level = 1.0
         self.pan_offset_x = 0
         self.pan_offset_y = 0
         self.draw_graph()
-        self.status_var.set("Вид сброшен")
     
     def start_pan(self, event):
         self.is_panning = True
@@ -545,7 +542,7 @@ class GraphVisualizerTkinter:
         # Рисуем легенду
         self.draw_legend()
         
-        # Обновляем статус
+        # Обновляем статус (без информации о масштабе)
         if self.algorithm_finished and self.algorithm_result:
             status_text = f"✅ {self.algorithm_result}"
         elif self.current_history_index >= 0 and self.history:
@@ -558,9 +555,6 @@ class GraphVisualizerTkinter:
                 status_text += " | ⏸️ ПАУЗА"
         else:
             status_text = "⏸️ Программа запущена в режиме паузы"
-        
-        if abs(self.zoom_level - 1.0) > 0.01 or self.pan_offset_x != 0 or self.pan_offset_y != 0:
-            status_text += f" | Масштаб: {self.zoom_level:.1%}"
         
         self.status_var.set(status_text)
     
@@ -598,7 +592,7 @@ class GraphVisualizerTkinter:
                 state_info = "⏸️ ПАУЗА" if self.pause else "▶️ ВЫПОЛНЕНИЕ"
                 self.canvas.create_text(legend_x, legend_y + 70, text=f"Состояние: {state_info}", anchor=tk.W, font=('Arial', 10, 'bold'))
         
-        # Информация о масштабе внизу
+        # Информация о масштабе внизу холста
         scale_y = 580
         scale_text = f"Масштаб: {self.zoom_level:.1%}"
         self.canvas.create_text(legend_x, scale_y, text=scale_text, anchor=tk.W, font=('Arial', 10, 'bold'), fill="darkblue")
