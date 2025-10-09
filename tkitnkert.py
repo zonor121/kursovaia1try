@@ -63,8 +63,31 @@ class GraphVisualizerTkinter:
         self.algorithm_var = tk.StringVar(value="dijkstra")
         algo_frame = ttk.Frame(self.control_frame)
         algo_frame.pack(side=tk.LEFT, padx=20)
-        ttk.Radiobutton(algo_frame, text="Дейкстра", variable=self.algorithm_var, value="dijkstra").pack(side=tk.LEFT)
-        ttk.Radiobutton(algo_frame, text="Беллман-Форд", variable=self.algorithm_var, value="bellman").pack(side=tk.LEFT)
+        
+        self.dijkstra_radio = ttk.Radiobutton(algo_frame, text="Дейкстра", variable=self.algorithm_var, value="dijkstra", command=self.on_algorithm_change)
+        self.dijkstra_radio.pack(side=tk.LEFT)
+        
+        self.bellman_radio = ttk.Radiobutton(algo_frame, text="Беллман-Форд", variable=self.algorithm_var, value="bellman", command=self.on_algorithm_change)
+        self.bellman_radio.pack(side=tk.LEFT)
+        
+        # Панель выбора начальной и конечной точек
+        self.selection_frame = ttk.Frame(self.root)
+        self.selection_frame.pack(pady=5)
+        
+        ttk.Label(self.selection_frame, text="Старт:", font=('Arial', 10)).pack(side=tk.LEFT, padx=5)
+        self.start_var = tk.StringVar()
+        self.start_combo = ttk.Combobox(self.selection_frame, textvariable=self.start_var, width=5, state="readonly")
+        self.start_combo.pack(side=tk.LEFT, padx=5)
+        self.start_combo.bind('<<ComboboxSelected>>', self.on_start_change)
+        
+        ttk.Label(self.selection_frame, text="Конец:", font=('Arial', 10)).pack(side=tk.LEFT, padx=5)
+        self.end_var = tk.StringVar()
+        self.end_combo = ttk.Combobox(self.selection_frame, textvariable=self.end_var, width=5, state="readonly")
+        self.end_combo.pack(side=tk.LEFT, padx=5)
+        self.end_combo.bind('<<ComboboxSelected>>', self.on_end_change)
+        
+        self.apply_btn = ttk.Button(self.selection_frame, text="Применить", command=self.apply_selection)
+        self.apply_btn.pack(side=tk.LEFT, padx=10)
         
         # Панель скорости
         self.speed_frame = ttk.Frame(self.root)
@@ -98,6 +121,16 @@ class GraphVisualizerTkinter:
         self.status_label = ttk.Label(self.root, textvariable=self.status_var, font=('Arial', 12))
         self.status_label.pack(pady=5)
         
+        # Таблица результатов для Беллмана-Форда
+        self.results_frame = ttk.Frame(self.root)
+        self.results_frame.pack(pady=5, fill=tk.X, padx=10)
+        
+        ttk.Label(self.results_frame, text="Результаты Беллмана-Форда:", font=('Arial', 10, 'bold')).pack(anchor=tk.W)
+        
+        # Создаем Treeview для таблицы
+        self.results_tree = ttk.Treeview(self.results_frame, height=6, show='headings')
+        self.results_tree.pack(fill=tk.X, pady=5)
+        
         # Данные графа
         self.graph = {}
         self.positions = {}
@@ -108,10 +141,134 @@ class GraphVisualizerTkinter:
         self.algorithm_finished = False
         self.auto_animation_id = None
         self.algorithm_result = ""
+        self.has_negative_weights = False
         
         # Инициализация
         self.initialize_default_graph()
         self.initialize_algorithm()
+    
+    def update_results_table(self):
+        """Обновляет таблицу результатов для Беллмана-Форда"""
+        # Очищаем таблицу
+        for item in self.results_tree.get_children():
+            self.results_tree.delete(item)
+        
+        # Настраиваем колонки
+        self.results_tree['columns'] = ('node', 'distance', 'path')
+        self.results_tree.column('node', width=80, anchor=tk.CENTER)
+        self.results_tree.column('distance', width=120, anchor=tk.CENTER)
+        self.results_tree.column('path', width=200, anchor=tk.W)
+        
+        self.results_tree.heading('node', text='Вершина')
+        self.results_tree.heading('distance', text='Расстояние')
+        self.results_tree.heading('path', text='Путь')
+        
+        # Заполняем таблицу данными
+        if hasattr(self, 'distances') and hasattr(self, 'start_node'):
+            for node in sorted(self.distances.keys()):
+                distance = self.distances[node]
+                if distance == float('inf'):
+                    distance_str = "∞"
+                    path_str = "Недостижима"
+                else:
+                    distance_str = f"{distance:.1f}"
+                    # Восстанавливаем путь для этой вершины
+                    path = self.reconstruct_path_to_node(node)
+                    path_str = " → ".join(path) if path else "Старт"
+                
+                self.results_tree.insert('', 'end', values=(node, distance_str, path_str))
+    
+    def reconstruct_path_to_node(self, target_node):
+        """Восстанавливает путь до указанной вершины"""
+        if not hasattr(self, 'start_node') or not hasattr(self, 'previous'):
+            return []
+        
+        if target_node == self.start_node:
+            return [self.start_node]
+        
+        if target_node not in self.previous or self.distances[target_node] == float('inf'):
+            return []
+        
+        path = []
+        current = target_node
+        while current != self.start_node:
+            path.append(current)
+            if current not in self.previous:
+                return []
+            current = self.previous[current]
+        path.append(self.start_node)
+        path.reverse()
+        return path
+    
+    def update_selection_comboboxes(self):
+        """Обновляет списки выбора начальной и конечной точек"""
+        if self.positions:
+            nodes = list(self.positions.keys())
+            self.start_combo['values'] = nodes
+            self.end_combo['values'] = nodes
+            
+            # Устанавливаем значения по умолчанию если они не установлены
+            if not self.start_var.get() and hasattr(self, 'start_node'):
+                self.start_var.set(self.start_node)
+            if not self.end_var.get() and hasattr(self, 'end_node'):
+                self.end_var.set(self.end_node)
+    
+    def on_start_change(self, event=None):
+        """Обрабатывает изменение начальной точки"""
+        new_start = self.start_var.get()
+        if new_start and hasattr(self, 'start_node') and new_start != self.start_node:
+            self.start_node = new_start
+            self.status_var.set(f"Стартовая точка изменена на: {new_start}")
+            self.restart()
+    
+    def on_end_change(self, event=None):
+        """Обрабатывает изменение конечной точки"""
+        new_end = self.end_var.get()
+        if new_end and hasattr(self, 'end_node') and new_end != self.end_node:
+            self.end_node = new_end
+            self.status_var.set(f"Конечная точка изменена на: {new_end}")
+            self.restart()
+    
+    def apply_selection(self):
+        """Применяет выбранные начальную и конечную точки"""
+        start = self.start_var.get()
+        end = self.end_var.get()
+        
+        if not start or not end:
+            messagebox.showwarning("Предупреждение", "Выберите начальную и конечную точки")
+            return
+        
+        if start == end:
+            messagebox.showwarning("Предупреждение", "Начальная и конечная точки не могут совпадать")
+            return
+        
+        self.start_node = start
+        self.end_node = end
+        self.status_var.set(f"Установлены: Старт={start}, Конец={end}")
+        self.restart()
+    
+    def check_negative_weights(self):
+        """Проверяет наличие отрицательных весов в графе"""
+        self.has_negative_weights = any(weight < 0 for weight in self.graph.values())
+        return self.has_negative_weights
+    
+    def on_algorithm_change(self):
+        """Обрабатывает изменение выбора алгоритма"""
+        if self.algorithm_var.get() == "dijkstra" and self.has_negative_weights:
+            messagebox.showwarning(
+                "Предупреждение", 
+                "Алгоритм Дейкстры не работает с отрицательными весами!\n"
+                "Автоматически переключен на алгоритм Беллмана-Форда."
+            )
+            self.algorithm_var.set("bellman")
+        
+        # Показываем/скрываем таблицу результатов в зависимости от алгоритма
+        if self.algorithm_var.get() == "bellman":
+            self.results_frame.pack(pady=5, fill=tk.X, padx=10)
+        else:
+            self.results_frame.pack_forget()
+        
+        self.restart()
     
     def zoom(self, event):
         if event.delta > 0 or event.num == 4:
@@ -209,12 +366,42 @@ class GraphVisualizerTkinter:
                 self.graph[(v, u)] = weight
             
             self.calculate_positions()
+            
+            # Устанавливаем старт и финиш из файла или по умолчанию
             self.start_node = start_node if start_node else list(self.positions.keys())[0]
             self.end_node = end_node if end_node else list(self.positions.keys())[-1]
+            
             self.original_positions = self.positions.copy()
+            
+            # Обновляем комбобоксы выбора
+            self.update_selection_comboboxes()
+            
+            # Проверяем отрицательные веса
+            has_negative = self.check_negative_weights()
+            
+            # Если есть отрицательные веса и выбран Дейкстра - переключаем
+            if has_negative and self.algorithm_var.get() == "dijkstra":
+                messagebox.showwarning(
+                    "Предупреждение", 
+                    "Обнаружены отрицательные веса!\n"
+                    "Алгоритм Дейкстры не работает с отрицательными весами.\n"
+                    "Автоматически переключен на алгоритм Беллмана-Форда."
+                )
+                self.algorithm_var.set("bellman")
+            
+            # Показываем/скрываем таблицу результатов
+            if self.algorithm_var.get() == "bellman":
+                self.results_frame.pack(pady=5, fill=tk.X, padx=10)
+            else:
+                self.results_frame.pack_forget()
+            
             self.restart()
             
-            messagebox.showinfo("Успех", f"Граф загружен!\nРебер: {len(edges)}\nУзлов: {len(self.positions)}\nСтарт: {self.start_node}, Конец: {self.end_node}")
+            message_text = f"Граф загружен!\nРебер: {len(edges)}\nУзлов: {len(self.positions)}\nСтарт: {self.start_node}, Конец: {self.end_node}"
+            if has_negative:
+                message_text += f"\n⚠️ Обнаружены отрицательные веса!"
+            
+            messagebox.showinfo("Успех", message_text)
             
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось загрузить файл:\n{str(e)}")
@@ -271,6 +458,8 @@ class GraphVisualizerTkinter:
         self.start_node = 'G'
         self.end_node = 'D'
         self.original_positions = self.positions.copy()
+        self.check_negative_weights()
+        self.update_selection_comboboxes()
     
     def change_speed(self, speed_name, delay_ms):
         self.current_speed_delay = delay_ms
@@ -282,6 +471,7 @@ class GraphVisualizerTkinter:
             self.auto_animate()
     
     def initialize_algorithm(self):
+        # Шаг 1: Инициализация расстояний
         self.distances = {node: float('inf') for node in self.positions}
         if hasattr(self, 'start_node'):
             self.distances[self.start_node] = 0
@@ -295,14 +485,21 @@ class GraphVisualizerTkinter:
         if self.algorithm_var.get() == "dijkstra" and hasattr(self, 'start_node'):
             self.pq = [(0, self.start_node)]
         else:
+            # Для Беллмана-Форда создаем список всех ребер
             self.edges = self.get_edges_list()
             self.iteration = 0
             self.edge_index = 0
+            self.relaxation_occurred = False
         
         self.history.clear()
-        self.save_state("Начальное состояние")
+        self.save_state("Шаг 1: Инициализация расстояний")
+        
+        # Обновляем таблицу результатов для Беллмана-Форда
+        if self.algorithm_var.get() == "bellman":
+            self.update_results_table()
     
     def get_edges_list(self):
+        """Создает список всех ребер для Беллмана-Форда"""
         edges = []
         for (u, v), weight in self.graph.items():
             edges.append((u, v, weight))
@@ -331,9 +528,14 @@ class GraphVisualizerTkinter:
         if hasattr(self, 'iteration'):
             state['iteration'] = self.iteration
             state['edge_index'] = self.edge_index
+            state['relaxation_occurred'] = getattr(self, 'relaxation_occurred', False)
         
         self.history.append(state)
         self.current_history_index = len(self.history) - 1
+        
+        # Обновляем таблицу результатов для Беллмана-Форда
+        if self.algorithm_var.get() == "bellman":
+            self.update_results_table()
     
     def load_state(self, index):
         if 0 <= index < len(self.history):
@@ -350,6 +552,12 @@ class GraphVisualizerTkinter:
             if 'iteration' in state:
                 self.iteration = state['iteration']
                 self.edge_index = state['edge_index']
+                self.relaxation_occurred = state['relaxation_occurred']
+            
+            # Обновляем таблицу результатов для Беллмана-Форда
+            if self.algorithm_var.get() == "bellman":
+                self.update_results_table()
+            
             return True
         return False
     
@@ -389,12 +597,49 @@ class GraphVisualizerTkinter:
         return True
     
     def bellman_ford_step(self):
+        """Корректный алгоритм Беллмана-Форда согласно описанию"""
         if not hasattr(self, 'edges'):
             return False
-            
-        if self.iteration >= len(self.positions) - 1:
+        
+        # Шаг 2: |V|-1 итераций релаксации
+        if self.iteration < len(self.positions) - 1:
             if self.edge_index < len(self.edges):
                 u, v, weight = self.edges[self.edge_index]
+                self.current_node = u
+                
+                # Релаксация ребра: если dist[v] > dist[u] + weight(u,v)
+                if self.distances[u] != float('inf') and self.distances[u] + weight < self.distances[v]:
+                    old_dist = self.distances[v]
+                    self.distances[v] = self.distances[u] + weight
+                    self.previous[v] = u
+                    self.relaxation_occurred = True
+                    self.save_state(f"Итерация {self.iteration+1}: {u}→{v} ({weight}) - обновлено {old_dist:.1f}→{self.distances[v]:.1f}")
+                else:
+                    self.save_state(f"Итерация {self.iteration+1}: {u}→{v} ({weight}) - без изменений")
+                
+                self.edge_index += 1
+                return True
+            else:
+                # Завершили проход по всем ребрам для текущей итерации
+                if self.relaxation_occurred:
+                    # Были изменения - переходим к следующей итерации
+                    self.iteration += 1
+                    self.edge_index = 0
+                    self.relaxation_occurred = False
+                    self.current_node = None
+                    self.save_state(f"Начало итерации {self.iteration+1}")
+                    return True
+                else:
+                    # Не было изменений - алгоритм завершен
+                    self.algorithm_finished = True
+                    self.reconstruct_path()
+                    return False
+        
+        # Шаг 3: Проверка на отрицательные циклы
+        else:
+            if self.edge_index < len(self.edges):
+                u, v, weight = self.edges[self.edge_index]
+                # Если dist[v] > dist[u] + weight(u,v) - найден отрицательный цикл
                 if self.distances[u] != float('inf') and self.distances[u] + weight < self.distances[v]:
                     self.algorithm_finished = True
                     self.algorithm_result = f"Обнаружен отрицательный цикл! {u}→{v}"
@@ -403,30 +648,10 @@ class GraphVisualizerTkinter:
                 self.edge_index += 1
                 return True
             else:
+                # Алгоритм завершен успешно
                 self.algorithm_finished = True
                 self.reconstruct_path()
                 return False
-        
-        if self.edge_index < len(self.edges):
-            u, v, weight = self.edges[self.edge_index]
-            self.current_node = u
-            
-            old_distance = self.distances[v]
-            if self.distances[u] != float('inf') and self.distances[u] + weight < self.distances[v]:
-                self.distances[v] = self.distances[u] + weight
-                self.previous[v] = u
-                self.save_state(f"Итерация {self.iteration+1}: {u}→{v} ({weight}) - обновлено {old_distance}→{self.distances[v]}")
-            else:
-                self.save_state(f"Итерация {self.iteration+1}: {u}→{v} ({weight}) - без изменений")
-            
-            self.edge_index += 1
-        else:
-            self.iteration += 1
-            self.edge_index = 0
-            self.current_node = None
-            self.save_state(f"Начало итерации {self.iteration+1}")
-        
-        return True
     
     def reconstruct_path(self):
         if not hasattr(self, 'end_node') or not hasattr(self, 'start_node'):
@@ -458,6 +683,9 @@ class GraphVisualizerTkinter:
             return False
             
         if self.algorithm_var.get() == "dijkstra":
+            if self.has_negative_weights:
+                messagebox.showerror("Ошибка", "Алгоритм Дейкстры не работает с отрицательными весами!\nИспользуйте алгоритм Беллмана-Форда.")
+                return False
             return self.dijkstra_step()
         else:
             return self.bellman_ford_step()
@@ -479,6 +707,11 @@ class GraphVisualizerTkinter:
                 edge_color = "gray"
                 edge_width = max(1, int(2 * self.zoom_level))
                 
+                # Подсвечиваем отрицательные веса красным
+                if weight < 0:
+                    edge_color = "red"
+                    edge_width = max(2, int(3 * self.zoom_level))
+                
                 if self.final_path and u in self.final_path and v in self.final_path:
                     try:
                         if abs(self.final_path.index(u) - self.final_path.index(v)) == 1:
@@ -495,9 +728,10 @@ class GraphVisualizerTkinter:
                 offset_y = -(x2 - x1) * 0.1
                 
                 font_size = max(8, int(10 * self.zoom_level))
+                weight_color = "red" if weight < 0 else "darkblue"
                 self.canvas.create_text(
                     mid_x + offset_x, mid_y + offset_y,
-                    text=str(weight), fill="darkblue",
+                    text=str(weight), fill=weight_color,
                     font=('Arial', font_size, 'bold')
                 )
         
@@ -531,7 +765,7 @@ class GraphVisualizerTkinter:
             self.canvas.create_text(x, y, text=node, fill=text_color, font=('Arial', font_size, 'bold'))
             
             if node in self.distances and self.distances[node] != float('inf'):
-                dist_text = f"{self.distances[node]}"
+                dist_text = f"{self.distances[node]:.1f}"
                 dist_font_size = max(6, int(10 * self.zoom_level))
                 self.canvas.create_text(
                     x + 30 * self.zoom_level, y - 30 * self.zoom_level,
@@ -569,6 +803,10 @@ class GraphVisualizerTkinter:
             ("Не посещенный", "lightgray")
         ]
         
+        # Добавляем пункт для отрицательных весов если они есть
+        if self.has_negative_weights:
+            legend_items.append(("Отрицательный вес", "red"))
+        
         for text, color in legend_items:
             self.canvas.create_rectangle(legend_x, legend_y, legend_x + 15, legend_y + 15, fill=color, outline="black")
             self.canvas.create_text(legend_x + 25, legend_y + 7, text=text, anchor=tk.W, font=('Arial', 10))
@@ -576,11 +814,18 @@ class GraphVisualizerTkinter:
         
         if hasattr(self, 'start_node') and hasattr(self, 'end_node'):
             algo_name = "Дейкстра" if self.algorithm_var.get() == "dijkstra" else "Беллман-Форд"
-            self.canvas.create_text(legend_x, legend_y + 10, text=f"Алгоритм: {algo_name}", anchor=tk.W, font=('Arial', 10, 'bold'))
+            algo_color = "red" if (self.algorithm_var.get() == "dijkstra" and self.has_negative_weights) else "black"
+            self.canvas.create_text(legend_x, legend_y + 10, text=f"Алгоритм: {algo_name}", anchor=tk.W, font=('Arial', 10, 'bold'), fill=algo_color)
             self.canvas.create_text(legend_x, legend_y + 30, text=f"Старт: {self.start_node}, Конец: {self.end_node}", anchor=tk.W, font=('Arial', 10))
             
             speed_text = f"Скорость: {self.speed_var.get()} ({self.current_speed_delay}мс/шаг)"
             self.canvas.create_text(legend_x, legend_y + 50, text=speed_text, anchor=tk.W, font=('Arial', 9))
+            
+            # Предупреждение об отрицательных весах
+            if self.has_negative_weights:
+                warning_text = "⚠️ Обнаружены отрицательные веса!"
+                self.canvas.create_text(legend_x, legend_y + 70, text=warning_text, anchor=tk.W, font=('Arial', 9, 'bold'), fill="red")
+                legend_y += 20
             
             if self.algorithm_finished and self.algorithm_result:
                 if "Найден путь" in self.algorithm_result:
@@ -665,6 +910,10 @@ if __name__ == "__main__":
     print("  - Загрузка графа из файла (формат: A B 5)")
     print("  - Управление скоростью анимации")
     print("  - Алгоритмы: Дейкстра и Беллман-Форд")
+    print("  - Автоматическое определение отрицательных весов")
+    print("  - Автопереключение на Беллмана-Форда при отрицательных весах")
+    print("  - Выбор начальной и конечной точек через интерфейс")
+    print("  - Таблица результатов для Беллмана-Форда (расстояния до всех вершин)")
     print("  - Пошаговое выполнение и перемотка")
     print("  - Масштабирование колесиком мыши")
     print("  - Панорамирование средней кнопкой мыши")
