@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QFileDialog, QMessageBox, QTreeWidget, QTreeWidgetItem,
                                QSlider, QSplitter, QFrame, QProgressBar, QButtonGroup)
 from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRect
-from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QFont, QPainterPath, QPalette
+from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QFont, QPainterPath, QPalette, QLinearGradient, QRadialGradient
 import json
 
 class GraphCanvas(QWidget):
@@ -21,8 +21,8 @@ class GraphCanvas(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         
-        # Фон
-        painter.fillRect(self.rect(), QColor(self.parent.current_theme['canvas_bg']))
+        # Фон с градиентом
+        self.draw_background(painter)
         
         if not self.parent.graph:
             # Сообщение при отсутствии графа
@@ -35,6 +35,29 @@ class GraphCanvas(QWidget):
         self.draw_nodes(painter)
         self.draw_legend(painter)
         
+    def draw_background(self, painter):
+        """Рисует фон с градиентом"""
+        gradient = QLinearGradient(0, 0, 0, self.height())
+        gradient.setColorAt(0, QColor(self.parent.current_theme['bg_gradient_start']))
+        gradient.setColorAt(1, QColor(self.parent.current_theme['bg_gradient_end']))
+        painter.fillRect(self.rect(), gradient)
+        
+        # Добавляем сетку для глубины
+        if self.parent.current_theme.get('show_grid', True):
+            self.draw_grid(painter)
+    
+    def draw_grid(self, painter):
+        """Рисует сетку на фоне"""
+        grid_color = QColor(self.parent.current_theme['grid_color'])
+        grid_color.setAlpha(20)
+        painter.setPen(QPen(grid_color, 1))
+        
+        spacing = 50
+        for x in range(0, self.width(), spacing):
+            painter.drawLine(x, 0, x, self.height())
+        for y in range(0, self.height(), spacing):
+            painter.drawLine(0, y, self.width(), y)
+    
     def draw_edges(self, painter):
         for (u, v), weight in self.parent.graph.items():
             if u in self.parent.positions and v in self.parent.positions:
@@ -43,16 +66,22 @@ class GraphCanvas(QWidget):
                 
                 # Определение стиля ребра
                 pen = QPen()
+                pen.setCapStyle(Qt.RoundCap)
+                
                 if weight < 0:
                     pen.setColor(QColor(self.parent.current_theme['danger']))
                     pen.setWidth(3)
+                    # Пунктир для отрицательных весов
+                    pen.setDashPattern([5, 3])
                 elif (self.parent.final_path and u in self.parent.final_path and 
                       v in self.parent.final_path and 
                       abs(self.parent.final_path.index(u) - self.parent.final_path.index(v)) == 1):
                     pen.setColor(QColor(self.parent.current_theme['success']))
                     pen.setWidth(4)
                 else:
-                    pen.setColor(QColor(self.parent.current_theme['text_secondary']))
+                    edge_color = QColor(self.parent.current_theme['text_secondary'])
+                    edge_color.setAlpha(150)
+                    pen.setColor(edge_color)
                     pen.setWidth(2)
                 
                 painter.setPen(pen)
@@ -68,9 +97,15 @@ class GraphCanvas(QWidget):
         offset_x = (y2 - y1) * 0.1
         offset_y = -(x2 - x1) * 0.1
         
+        # Фон для текста веса
+        bg_rect = QRect(int(mid_x + offset_x - 15), int(mid_y + offset_y - 10), 30, 20)
+        painter.setBrush(QColor(self.parent.current_theme['bg_secondary']))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(bg_rect, 5, 5)
+        
         painter.setPen(QColor(self.parent.current_theme['text']))
         painter.setFont(QFont("Arial", max(8, int(10 * self.parent.zoom_level)), QFont.Bold))
-        painter.drawText(int(mid_x + offset_x), int(mid_y + offset_y), str(weight))
+        painter.drawText(bg_rect, Qt.AlignCenter, str(weight))
     
     def draw_nodes(self, painter):
         for node, (orig_x, orig_y) in self.parent.positions.items():
@@ -78,16 +113,26 @@ class GraphCanvas(QWidget):
             
             # Определение цвета узла
             color = self.parent.get_node_color(node)
-            brush = QBrush(QColor(color))
+            brush = self.create_node_brush(x, y, color)
             
-            # Рисование узла
+            # Рисование узла с тенью
             radius = max(15, int(20 * self.parent.zoom_level))
+            
+            # Тень
+            shadow_offset = 3
+            shadow_brush = QBrush(QColor(0, 0, 0, 80))
+            painter.setBrush(shadow_brush)
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(int(x - radius + shadow_offset), int(y - radius + shadow_offset), 
+                              radius * 2, radius * 2)
+            
+            # Основной узел
             painter.setBrush(brush)
             painter.setPen(QPen(QColor(self.parent.current_theme['border']), 2))
             painter.drawEllipse(int(x - radius), int(y - radius), radius * 2, radius * 2)
             
             # Текст узла
-            text_color = "white" if color in ["#4CAF50", "#F44336", "#bb86fc", "#4caf50", "#ffb74d"] else "black"
+            text_color = "white" if color in ["#4CAF50", "#F44336", "#7B61FF", "#4caf50", "#ffb74d"] else "black"
             painter.setPen(QColor(text_color))
             painter.setFont(QFont("Arial", max(8, int(12 * self.parent.zoom_level)), QFont.Bold))
             painter.drawText(int(x - radius), int(y - radius), radius * 2, radius * 2, 
@@ -98,15 +143,49 @@ class GraphCanvas(QWidget):
                 self.parent.zoom_level > 0.5):
                 self.draw_node_distance(painter, x, y, node)
     
+    def create_node_brush(self, x, y, base_color):
+        """Создает градиентную кисть для узла"""
+        radius = max(15, int(20 * self.parent.zoom_level))
+        gradient = QRadialGradient(x, y, radius)
+        
+        base_qcolor = QColor(base_color)
+        light_color = base_qcolor.lighter(120)
+        dark_color = base_qcolor.darker(120)
+        
+        gradient.setColorAt(0, light_color)
+        gradient.setColorAt(0.7, base_qcolor)
+        gradient.setColorAt(1, dark_color)
+        
+        return QBrush(gradient)
+    
     def draw_node_distance(self, painter, x, y, node):
         dist_text = f"{self.parent.distances[node]:.1f}"
+        
+        # Фон для расстояния
+        text_rect = QRect(int(x + 20 * self.parent.zoom_level), 
+                         int(y - 40 * self.parent.zoom_level), 
+                         40, 20)
+        painter.setBrush(QColor(self.parent.current_theme['bg_secondary']))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(text_rect, 4, 4)
+        
         painter.setPen(QColor(self.parent.current_theme['accent']))
         painter.setFont(QFont("Arial", max(6, int(10 * self.parent.zoom_level)), QFont.Bold))
-        painter.drawText(int(x + 30 * self.parent.zoom_level), 
-                       int(y - 30 * self.parent.zoom_level), dist_text)
+        painter.drawText(text_rect, Qt.AlignCenter, dist_text)
     
     def draw_legend(self, painter):
         legend_x, legend_y = 20, 20
+        
+        # Фон легенды
+        legend_width = 200
+        legend_height = 200
+        legend_rect = QRect(legend_x, legend_y, legend_width, legend_height)
+        
+        # Glass morphism эффект
+        painter.setBrush(QColor(45, 45, 45, 180))
+        painter.setPen(QPen(QColor(255, 255, 255, 50), 1))
+        painter.drawRoundedRect(legend_rect, 12, 12)
+        
         legend_items = [
             ("Текущий узел", self.parent.current_theme['warning']),
             ("Посещенный", self.parent.current_theme['accent']),
@@ -118,20 +197,21 @@ class GraphCanvas(QWidget):
         
         painter.setFont(QFont("Arial", 10))
         
-        for text, color in legend_items:
+        for i, (text, color) in enumerate(legend_items):
+            item_y = legend_y + 35 + i * 25
+            
             # Квадратик легенды
             painter.setBrush(QBrush(QColor(color)))
             painter.setPen(QPen(QColor(self.parent.current_theme['border']), 1))
-            painter.drawRect(legend_x, legend_y, 15, 15)
+            painter.drawRect(legend_x + 15, item_y - 10, 15, 15)
             
             # Текст легенды
             painter.setPen(QColor(self.parent.current_theme['text']))
-            painter.drawText(legend_x + 25, legend_y + 12, text)
-            legend_y += 25
+            painter.drawText(legend_x + 40, item_y, text)
         
         # Дополнительная информация
         if hasattr(self.parent, 'start_node') and hasattr(self.parent, 'end_node'):
-            info_y = legend_y + 20
+            info_y = legend_y + legend_height + 10
             algo_name = "Дейкстра" if self.parent.dijkstra_radio.isChecked() else "Беллман-Форд"
             
             painter.setFont(QFont("Arial", 11, QFont.Bold))
@@ -183,7 +263,7 @@ class ModernGraphVisualizer(QMainWindow):
         self.setWindowTitle("Визуализация алгоритмов кратчайшего пути - Modern UI")
         self.setGeometry(100, 100, 1400, 900)
         
-        # Настройка темной темы по умолчанию
+        # Настройка темной темы
         self.dark_mode = True
         self.setup_themes()
         self.apply_theme()
@@ -217,70 +297,43 @@ class ModernGraphVisualizer(QMainWindow):
         self.initialize_algorithm()
 
     def setup_themes(self):
-        """Настройка цветовых тем"""
-        self.themes = {
-            'dark': {
-                'bg': '#1e1e1e',
-                'bg_secondary': '#2d2d2d',
-                'bg_tertiary': '#3d3d3d',
-                'text': '#ffffff',
-                'text_secondary': '#cccccc',
-                'accent': '#bb86fc',
-                'accent_secondary': '#03dac6',
-                'danger': '#cf6679',
-                'warning': '#ffb74d',
-                'success': '#4caf50',
-                'border': '#444444',
-                'canvas_bg': '#121212'
-            },
-            'light': {
-                'bg': '#ffffff',
-                'bg_secondary': '#f5f5f5',
-                'bg_tertiary': '#eeeeee',
-                'text': '#212121',
-                'text_secondary': '#757575',
-                'accent': '#6200ee',
-                'accent_secondary': '#018786',
-                'danger': '#b00020',
-                'warning': '#ff9800',
-                'success': '#4caf50',
-                'border': '#e0e0e0',
-                'canvas_bg': '#fafafa'
-            }
+        """Настройка темной цветовой темы"""
+        self.current_theme = {
+            'bg': '#1a1a1a',
+            'bg_gradient_start': '#1a1a1a',
+            'bg_gradient_end': '#2a2a2a',
+            'bg_secondary': 'rgba(45, 45, 45, 0.8)',
+            'bg_tertiary': 'rgba(60, 60, 60, 0.6)',
+            'text': '#ffffff',
+            'text_secondary': '#aaaaaa',
+            'accent': '#7B61FF',  # Современный фиолетовый
+            'accent_secondary': '#00D4FF',
+            'danger': '#FF6B6B',
+            'warning': '#FFD93D',
+            'success': '#6BCF7F',
+            'border': 'rgba(255, 255, 255, 0.1)',
+            'canvas_bg': '#121212',
+            'grid_color': '#ffffff',
+            'show_grid': True,
+            'glass_effect': True
         }
-        self.current_theme = self.themes['dark']
 
     def apply_theme(self):
-        """Применение текущей темы"""
+        """Применение темной темы"""
         palette = QPalette()
-        if self.dark_mode:
-            palette.setColor(QPalette.Window, QColor(self.current_theme['bg']))
-            palette.setColor(QPalette.WindowText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Base, QColor(self.current_theme['bg_secondary']))
-            palette.setColor(QPalette.AlternateBase, QColor(self.current_theme['bg_tertiary']))
-            palette.setColor(QPalette.ToolTipBase, QColor(self.current_theme['bg']))
-            palette.setColor(QPalette.ToolTipText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Text, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Button, QColor(self.current_theme['bg_secondary']))
-            palette.setColor(QPalette.ButtonText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.BrightText, Qt.red)
-            palette.setColor(QPalette.Link, QColor(self.current_theme['accent']))
-            palette.setColor(QPalette.Highlight, QColor(self.current_theme['accent']))
-            palette.setColor(QPalette.HighlightedText, Qt.black)
-        else:
-            palette.setColor(QPalette.Window, QColor(self.current_theme['bg']))
-            palette.setColor(QPalette.WindowText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Base, QColor(self.current_theme['bg_secondary']))
-            palette.setColor(QPalette.AlternateBase, QColor(self.current_theme['bg_tertiary']))
-            palette.setColor(QPalette.ToolTipBase, QColor(self.current_theme['bg']))
-            palette.setColor(QPalette.ToolTipText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Text, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Button, QColor(self.current_theme['bg_secondary']))
-            palette.setColor(QPalette.ButtonText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.BrightText, Qt.red)
-            palette.setColor(QPalette.Link, QColor(self.current_theme['accent']))
-            palette.setColor(QPalette.Highlight, QColor(self.current_theme['accent']))
-            palette.setColor(QPalette.HighlightedText, Qt.white)
+        palette.setColor(QPalette.Window, QColor(self.current_theme['bg']))
+        palette.setColor(QPalette.WindowText, QColor(self.current_theme['text']))
+        palette.setColor(QPalette.Base, QColor(self.current_theme['bg_secondary']))
+        palette.setColor(QPalette.AlternateBase, QColor(self.current_theme['bg_tertiary']))
+        palette.setColor(QPalette.ToolTipBase, QColor(self.current_theme['bg']))
+        palette.setColor(QPalette.ToolTipText, QColor(self.current_theme['text']))
+        palette.setColor(QPalette.Text, QColor(self.current_theme['text']))
+        palette.setColor(QPalette.Button, QColor(self.current_theme['bg_secondary']))
+        palette.setColor(QPalette.ButtonText, QColor(self.current_theme['text']))
+        palette.setColor(QPalette.BrightText, Qt.red)
+        palette.setColor(QPalette.Link, QColor(self.current_theme['accent']))
+        palette.setColor(QPalette.Highlight, QColor(self.current_theme['accent']))
+        palette.setColor(QPalette.HighlightedText, Qt.black)
         
         QApplication.setPalette(palette)
 
@@ -289,14 +342,23 @@ class ModernGraphVisualizer(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(15)
 
         # Верхняя панель управления
         self.create_top_panel(layout)
         
         # Разделитель для основной области
         splitter = QSplitter(Qt.Horizontal)
+        splitter.setHandleWidth(2)
+        splitter.setStyleSheet(f"""
+            QSplitter::handle {{
+                background: {self.current_theme['border']};
+            }}
+            QSplitter::handle:hover {{
+                background: {self.current_theme['accent']};
+            }}
+        """)
         layout.addWidget(splitter)
         
         # Левая панель - холст
@@ -314,41 +376,27 @@ class ModernGraphVisualizer(QMainWindow):
         splitter.setSizes([1000, 400])
 
     def create_top_panel(self, layout):
-        """Создание верхней панели управления"""
+        """Создание верхней панели управления с glass morphism"""
         top_frame = QFrame()
-        top_frame.setMaximumHeight(100)
+        top_frame.setMaximumHeight(110)
         top_frame.setStyleSheet(f"""
             QFrame {{
                 background: {self.current_theme['bg_secondary']};
                 border: 1px solid {self.current_theme['border']};
-                border-radius: 8px;
-                padding: 8px;
+                border-radius: 15px;
+                padding: 12px;
             }}
         """)
         
         top_layout = QHBoxLayout(top_frame)
-        top_layout.setSpacing(15)
+        top_layout.setSpacing(20)
+        top_layout.setContentsMargins(15, 10, 15, 10)
         
         # Группа алгоритмов
         algo_group = QGroupBox("Выбор алгоритма")
-        algo_group.setStyleSheet(f"""
-            QGroupBox {{
-                color: {self.current_theme['accent']};
-                font-weight: bold;
-                font-size: 12px;
-                border: 1px solid {self.current_theme['border']};
-                border-radius: 6px;
-                margin-top: 6px;
-                padding-top: 8px;
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-            }}
-        """)
+        algo_group.setStyleSheet(self.get_glass_groupbox_style())
         algo_layout = QHBoxLayout(algo_group)
-        algo_layout.setSpacing(10)
+        algo_layout.setSpacing(15)
         
         self.algorithm_group = QButtonGroup(self)
         
@@ -359,28 +407,29 @@ class ModernGraphVisualizer(QMainWindow):
         radio_style = f"""
             QRadioButton {{
                 color: {self.current_theme['text']};
-                font-weight: normal;
-                font-size: 11px;
-                padding: 4px 8px;
+                font-weight: 500;
+                font-size: 12px;
+                padding: 8px 12px;
                 border: 1px solid transparent;
-                border-radius: 4px;
+                border-radius: 8px;
+                background: {self.current_theme['bg_tertiary']};
             }}
             QRadioButton:hover {{
-                background: {self.current_theme['bg_tertiary']};
-                border: 1px solid {self.current_theme['accent']};
+                background: {self.current_theme['accent']}20;
+                border: 1px solid {self.current_theme['accent']}40;
             }}
             QRadioButton::indicator {{
-                width: 14px;
-                height: 14px;
+                width: 16px;
+                height: 16px;
             }}
             QRadioButton::indicator::unchecked {{
                 border: 2px solid {self.current_theme['text_secondary']};
-                border-radius: 7px;
-                background: {self.current_theme['bg_tertiary']};
+                border-radius: 8px;
+                background: transparent;
             }}
             QRadioButton::indicator::checked {{
                 border: 2px solid {self.current_theme['accent']};
-                border-radius: 7px;
+                border-radius: 8px;
                 background: {self.current_theme['accent']};
             }}
         """
@@ -397,14 +446,14 @@ class ModernGraphVisualizer(QMainWindow):
         
         top_layout.addStretch(1)
         
-        # Кнопки управления с новыми иконками
+        # Кнопки управления с улучшенным дизайном
         control_layout = QHBoxLayout()
-        control_layout.setSpacing(8)
+        control_layout.setSpacing(12)
         
-        self.step_back_btn = self.create_control_button("◀◀", "Назад", self.step_backward)
-        self.step_forward_btn = self.create_control_button("▶▶", "Вперед", self.step_forward)
-        self.pause_btn = self.create_control_button("❚❚", "Пауза", self.toggle_pause)  # Исправленная иконка паузы
-        self.restart_btn = self.create_control_button("↺", "Сброс", self.restart)
+        self.step_back_btn = self.create_glass_button("◀◀", "Назад", self.step_backward)
+        self.step_forward_btn = self.create_glass_button("▶▶", "Вперед", self.step_forward)
+        self.pause_btn = self.create_glass_button("❚❚", "Пауза", self.toggle_pause)
+        self.restart_btn = self.create_glass_button("↺", "Сброс", self.restart)
         
         control_layout.addWidget(self.step_back_btn)
         control_layout.addWidget(self.step_forward_btn)
@@ -417,94 +466,78 @@ class ModernGraphVisualizer(QMainWindow):
         
         # Кнопки загрузки
         file_layout = QHBoxLayout()
-        file_layout.setSpacing(8)
+        file_layout.setSpacing(12)
         
-        self.load_btn = self.create_styled_button("📁 Загрузить", self.load_graph_from_file)
-        self.random_btn = self.create_styled_button("🎲 Случайный", self.generate_random_graph)
-        self.theme_btn = self.create_styled_button("🌙 Тема", self.toggle_theme)
+        self.load_btn = self.create_glass_button("📁", "Загрузить граф", self.load_graph_from_file)
+        self.random_btn = self.create_glass_button("🎲", "Случайный граф", self.generate_random_graph)
         
         file_layout.addWidget(self.load_btn)
         file_layout.addWidget(self.random_btn)
-        file_layout.addWidget(self.theme_btn)
         
         top_layout.addLayout(file_layout)
         
         layout.addWidget(top_frame)
 
-    def create_control_button(self, icon, tooltip, callback):
-        """Создание кнопки управления с монохромной иконкой"""
+    def create_glass_button(self, icon, tooltip, callback):
+        """Создание кнопки с glass morphism эффектом"""
         btn = QPushButton(icon)
         btn.setToolTip(tooltip)
         btn.setStyleSheet(f"""
             QPushButton {{
                 background: {self.current_theme['bg_tertiary']};
-                border: 2px solid {self.current_theme['border']};
-                border-radius: 8px;
-                padding: 10px;
+                border: 1px solid {self.current_theme['border']};
+                border-radius: 10px;
+                padding: 12px;
                 color: {self.current_theme['text']};
                 font-weight: bold;
                 font-size: 16px;
                 min-width: 50px;
-                min-height: 40px;
+                min-height: 45px;
             }}
             QPushButton:hover {{
-                background: {self.current_theme['accent']};
-                border: 2px solid {self.current_theme['accent_secondary']};
-                color: {self.current_theme['bg']};
+                background: {self.current_theme['accent']}30;
+                border: 1px solid {self.current_theme['accent']}60;
             }}
             QPushButton:pressed {{
-                background: {self.current_theme['accent_secondary']};
-                border: 2px solid {self.current_theme['accent']};
-            }}
-            QPushButton:disabled {{
-                background: {self.current_theme['bg_secondary']};
-                border: 2px solid {self.current_theme['text_secondary']};
-                color: {self.current_theme['text_secondary']};
+                background: {self.current_theme['accent']}60;
+                border: 1px solid {self.current_theme['accent']};
             }}
         """)
         btn.clicked.connect(callback)
         return btn
 
-    def create_styled_button(self, text, callback):
-        """Создание стилизованной кнопки"""
-        btn = QPushButton(text)
-        btn.setStyleSheet(f"""
-            QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 {self.current_theme['bg_tertiary']}, 
-                    stop:1 {self.current_theme['bg_secondary']});
+    def get_glass_groupbox_style(self):
+        return f"""
+            QGroupBox {{
+                color: {self.current_theme['accent']};
+                font-weight: 600;
+                font-size: 13px;
                 border: 1px solid {self.current_theme['border']};
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: {self.current_theme['text']};
-                font-weight: bold;
-                font-size: 11px;
-                min-width: 80px;
+                border-radius: 12px;
+                margin-top: 8px;
+                padding-top: 10px;
+                background: {self.current_theme['bg_tertiary']};
             }}
-            QPushButton:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 {self.current_theme['accent']}, 
-                    stop:1 {self.current_theme['accent_secondary']});
-                border: 1px solid {self.current_theme['accent']};
-                color: black;
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 8px 0 8px;
             }}
-            QPushButton:pressed {{
-                background: {self.current_theme['accent_secondary']};
-            }}
-        """)
-        btn.clicked.connect(callback)
-        return btn
+        """
 
     def create_right_panel(self):
         """Создание правой панели управления"""
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
-        right_layout.setSpacing(15)
+        right_layout.setSpacing(20)
+        right_layout.setContentsMargins(10, 10, 10, 10)
         
         # Группа выбора узлов
         node_group = QGroupBox("Выбор узлов")
-        node_group.setStyleSheet(self.get_groupbox_style())
+        node_group.setStyleSheet(self.get_glass_groupbox_style())
         node_layout = QVBoxLayout(node_group)
+        node_layout.setSpacing(12)
+        node_layout.setContentsMargins(15, 20, 15, 15)
         
         start_layout = QHBoxLayout()
         start_layout.addWidget(QLabel("Старт:"))
@@ -520,52 +553,59 @@ class ModernGraphVisualizer(QMainWindow):
         end_layout.addWidget(self.end_combo)
         node_layout.addLayout(end_layout)
         
-        self.apply_btn = self.create_styled_button("Применить выбор", self.apply_selection)
+        self.apply_btn = self.create_glass_button("Применить", "Применить выбор", self.apply_selection)
         node_layout.addWidget(self.apply_btn)
         
         right_layout.addWidget(node_group)
         
-        # Группа скорости с увеличенными отступами
+        # Группа скорости
         speed_group = QGroupBox("Скорость анимации")
-        speed_group.setStyleSheet(self.get_groupbox_style())
+        speed_group.setStyleSheet(self.get_glass_groupbox_style())
         speed_layout = QVBoxLayout(speed_group)
-        speed_layout.setContentsMargins(12, 15, 12, 15)  # Увеличиваем отступы
-        speed_layout.setSpacing(10)
+        speed_layout.setContentsMargins(15, 20, 15, 20)
+        speed_layout.setSpacing(15)
         
         self.speed_slider = QSlider(Qt.Horizontal)
         self.speed_slider.setRange(0, 5)
         self.speed_slider.setValue(2)
         self.speed_slider.valueChanged.connect(self.change_speed)
         self.speed_slider.setStyleSheet(self.get_slider_style())
-        self.speed_slider.setMinimumHeight(30)  # Увеличиваем высоту слайдера
+        self.speed_slider.setMinimumHeight(35)
         speed_layout.addWidget(self.speed_slider)
         
         self.speed_label = QLabel("Средняя скорость")
-        self.speed_label.setStyleSheet(f"color: {self.current_theme['text']}; font-size: 11px; padding: 5px;")
+        self.speed_label.setStyleSheet(f"""
+            color: {self.current_theme['text']}; 
+            font-size: 12px; 
+            padding: 5px;
+            font-weight: 500;
+        """)
         speed_layout.addWidget(self.speed_label)
         
         right_layout.addWidget(speed_group)
         
         # Прогресс выполнения
         progress_group = QGroupBox("Прогресс выполнения")
-        progress_group.setStyleSheet(self.get_groupbox_style())
+        progress_group.setStyleSheet(self.get_glass_groupbox_style())
         progress_layout = QVBoxLayout(progress_group)
+        progress_layout.setContentsMargins(15, 20, 15, 20)
         
         self.progress_bar = QProgressBar()
         self.progress_bar.setStyleSheet(f"""
             QProgressBar {{
                 border: 2px solid {self.current_theme['border']};
-                border-radius: 5px;
+                border-radius: 8px;
                 text-align: center;
-                background: {self.current_theme['bg_secondary']};
+                background: {self.current_theme['bg_tertiary']};
                 color: {self.current_theme['text']};
-                font-weight: bold;
+                font-weight: 600;
+                height: 25px;
             }}
             QProgressBar::chunk {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 {self.current_theme['accent']}, 
                     stop:1 {self.current_theme['accent_secondary']});
-                border-radius: 3px;
+                border-radius: 6px;
             }}
         """)
         progress_layout.addWidget(self.progress_bar)
@@ -574,33 +614,39 @@ class ModernGraphVisualizer(QMainWindow):
         
         # Таблица результатов
         results_group = QGroupBox("Результаты")
-        results_group.setStyleSheet(self.get_groupbox_style())
+        results_group.setStyleSheet(self.get_glass_groupbox_style())
         results_layout = QVBoxLayout(results_group)
+        results_layout.setContentsMargins(10, 20, 10, 15)
         
         self.results_tree = QTreeWidget()
         self.results_tree.setHeaderLabels(["Вершина", "Расстояние", "Путь"])
         self.results_tree.setStyleSheet(f"""
             QTreeWidget {{
-                background: {self.current_theme['bg_secondary']};
+                background: {self.current_theme['bg_tertiary']};
                 color: {self.current_theme['text']};
                 border: 1px solid {self.current_theme['border']};
-                border-radius: 5px;
-                font-size: 10px;
+                border-radius: 8px;
+                font-size: 11px;
+                outline: none;
             }}
             QTreeWidget::item {{
-                padding: 4px;
+                padding: 6px;
                 border-bottom: 1px solid {self.current_theme['border']};
             }}
             QTreeWidget::item:selected {{
                 background: {self.current_theme['accent']};
-                color: black;
+                color: white;
+                border-radius: 4px;
+            }}
+            QTreeWidget::item:hover {{
+                background: {self.current_theme['accent']}20;
             }}
             QHeaderView::section {{
-                background: {self.current_theme['bg_tertiary']};
+                background: {self.current_theme['bg_secondary']};
                 color: {self.current_theme['text']};
-                padding: 6px;
+                padding: 8px;
                 border: 1px solid {self.current_theme['border']};
-                font-weight: bold;
+                font-weight: 600;
             }}
         """)
         self.results_tree.setColumnWidth(0, 80)
@@ -610,18 +656,20 @@ class ModernGraphVisualizer(QMainWindow):
         
         right_layout.addWidget(results_group)
         
-        # Информация о графе (убрали пункт "Алгоритм")
+        # Информация о графе
         info_group = QGroupBox("Информация о графе")
-        info_group.setStyleSheet(self.get_groupbox_style())
+        info_group.setStyleSheet(self.get_glass_groupbox_style())
         info_layout = QVBoxLayout(info_group)
+        info_layout.setContentsMargins(15, 20, 15, 20)
         
         self.graph_info_label = QLabel("Граф не загружен")
         self.graph_info_label.setWordWrap(True)
         self.graph_info_label.setStyleSheet(f"""
             color: {self.current_theme['text']}; 
-            font-size: 11px; 
+            font-size: 12px; 
             padding: 8px;
-            line-height: 1.4;
+            line-height: 1.5;
+            font-weight: 500;
         """)
         info_layout.addWidget(self.graph_info_label)
         
@@ -631,46 +679,33 @@ class ModernGraphVisualizer(QMainWindow):
         
         return right_widget
 
-    def get_groupbox_style(self):
-        return f"""
-            QGroupBox {{
-                color: {self.current_theme['accent']};
-                font-weight: bold;
-                font-size: 12px;
-                border: 1px solid {self.current_theme['border']};
-                border-radius: 6px;
-                margin-top: 6px;
-                padding-top: 8px;
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-            }}
-        """
-
     def get_combobox_style(self):
         return f"""
             QComboBox {{
                 background: {self.current_theme['bg_tertiary']};
                 color: {self.current_theme['text']};
                 border: 1px solid {self.current_theme['border']};
-                border-radius: 4px;
-                padding: 4px;
-                min-width: 60px;
+                border-radius: 6px;
+                padding: 6px;
+                min-width: 70px;
+                font-size: 11px;
             }}
             QComboBox::drop-down {{
                 border: none;
+                width: 20px;
             }}
             QComboBox::down-arrow {{
                 image: none;
                 border-left: 1px solid {self.current_theme['border']};
-                padding: 4px;
+                width: 10px;
+                height: 10px;
             }}
             QComboBox QAbstractItemView {{
                 background: {self.current_theme['bg_secondary']};
                 color: {self.current_theme['text']};
                 selection-background-color: {self.current_theme['accent']};
+                border: 1px solid {self.current_theme['border']};
+                border-radius: 6px;
             }}
         """
 
@@ -678,24 +713,26 @@ class ModernGraphVisualizer(QMainWindow):
         return f"""
             QSlider::groove:horizontal {{
                 border: 1px solid {self.current_theme['border']};
-                height: 8px;
+                height: 10px;
                 background: {self.current_theme['bg_tertiary']};
-                border-radius: 4px;
+                border-radius: 5px;
                 margin: 2px 0px;
             }}
             QSlider::handle:horizontal {{
-                background: {self.current_theme['accent']};
-                border: 2px solid {self.current_theme['accent_secondary']};
-                width: 20px;
-                height: 20px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 {self.current_theme['accent']}, 
+                    stop:1 {self.current_theme['accent_secondary']});
+                border: 2px solid {self.current_theme['bg_secondary']};
+                width: 22px;
+                height: 22px;
                 margin: -8px 0px;
-                border-radius: 10px;
+                border-radius: 11px;
             }}
             QSlider::sub-page:horizontal {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 {self.current_theme['accent']}, 
                     stop:1 {self.current_theme['accent_secondary']});
-                border-radius: 4px;
+                border-radius: 5px;
             }}
         """
 
@@ -710,6 +747,7 @@ class ModernGraphVisualizer(QMainWindow):
                 color: {self.current_theme['text']};
                 border-top: 1px solid {self.current_theme['border']};
                 font-size: 11px;
+                font-weight: 500;
             }}
         """)
 
@@ -732,13 +770,6 @@ class ModernGraphVisualizer(QMainWindow):
         transformed_y = center_y + (y - center_y + self.pan_offset_y) * self.zoom_level
         return transformed_x, transformed_y
 
-    def toggle_theme(self):
-        self.dark_mode = not self.dark_mode
-        self.current_theme = self.themes['dark'] if self.dark_mode else self.themes['light']
-        self.apply_theme()
-        self.theme_btn.setText("☀️ Светлая" if self.dark_mode else "🌙 Тёмная")
-        self.canvas_widget.update()
-
     def change_speed(self, value):
         speeds = ["Очень медленно", "Медленно", "Средняя", "Быстро", "Очень быстро", "Максимум"]
         delays = [2000, 1000, 500, 200, 50, 0]
@@ -760,23 +791,27 @@ class ModernGraphVisualizer(QMainWindow):
             self.graph[(u, v)] = weight
             self.graph[(v, u)] = weight
         
-        center_x, center_y = 400, 300
+        # Сохраняем исходную форму графа, но увеличиваем масштаб
+        center_x, center_y = 600, 400  # Центр смещен для большего пространства
+        scale_factor = 1.8  # Коэффициент увеличения
         
+        # Внутренний шестиугольник - увеличен с сохранением формы
         inner_nodes = ['A', 'B', 'C', 'D', 'E', 'F']
         for i, node in enumerate(inner_nodes):
             angle = 2 * math.pi * i / len(inner_nodes)
-            self.positions[node] = (
-                center_x + 120 * math.cos(angle),
-                center_y + 120 * math.sin(angle)
-            )
+            radius = 200 * scale_factor  # Увеличенный радиус с сохранением формы
+            x = center_x + radius * math.cos(angle)
+            y = center_y + radius * math.sin(angle)
+            self.positions[node] = (x, y)
         
-        middle_nodes = ['G', 'H', 'I']
-        for i, node in enumerate(middle_nodes):
-            angle = 2 * math.pi * i / len(middle_nodes) - math.pi/6
-            self.positions[node] = (
-                center_x + 250 * math.cos(angle),
-                center_y + 250 * math.sin(angle)
-            )
+        # Внешние узлы - увеличены с сохранением формы
+        outer_nodes = ['G', 'H', 'I']
+        for i, node in enumerate(outer_nodes):
+            angle = 2 * math.pi * i / len(outer_nodes) + math.pi/6
+            radius = 350 * scale_factor  # Увеличенный радиус с сохранением формы
+            x = center_x + radius * math.cos(angle)
+            y = center_y + radius * math.sin(angle)
+            self.positions[node] = (x, y)
         
         self.start_node = 'G'
         self.end_node = 'D'
@@ -786,7 +821,7 @@ class ModernGraphVisualizer(QMainWindow):
         self.update_graph_info()
 
     def update_graph_info(self):
-        """Обновление информации о графе (без пункта алгоритм)"""
+        """Обновление информации о графе"""
         nodes_count = len(self.positions)
         edges_count = len(self.graph) // 2
         negative_weights = "Да" if self.has_negative_weights else "Нет"
@@ -830,7 +865,6 @@ class ModernGraphVisualizer(QMainWindow):
         self.has_negative_weights = any(weight < 0 for weight in self.graph.values())
         return self.has_negative_weights
 
-    # Остальные методы остаются без изменений...
     def load_graph_from_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Выберите файл с графом", "", 
@@ -910,14 +944,17 @@ class ModernGraphVisualizer(QMainWindow):
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл:\n{str(e)}")
 
     def calculate_positions(self):
+        """Расчет позиций узлов с сохранением исходной формы"""
         nodes = list(set([node for edge in self.graph.keys() for node in edge]))
         self.positions = {}
         
-        center_x, center_y = 400, 300
-        radius = min(300, 40 * len(nodes))
+        center_x, center_y = 600, 400  # Центр смещен для большего пространства
+        scale_factor = 1.8  # Коэффициент увеличения
         
         for i, node in enumerate(nodes):
             angle = 2 * math.pi * i / len(nodes)
+            # Используем круговое расположение с увеличенным радиусом
+            radius = min(400 * scale_factor, 80 * len(nodes) * scale_factor)
             self.positions[node] = (
                 center_x + radius * math.cos(angle),
                 center_y + radius * math.sin(angle)
@@ -971,9 +1008,9 @@ class ModernGraphVisualizer(QMainWindow):
                                f"Ребер: {len(self.graph)//2}\n"
                                f"Старт: {self.start_node}, Конец: {self.end_node}")
 
+    # Остальные методы алгоритмов остаются без изменений
     def initialize_algorithm(self):
-        """Инициализация алгоритма согласно правильному описанию"""
-        # Шаг 1: Инициализация расстояний
+        """Инициализация алгоритма"""
         self.distances = {node: float('inf') for node in self.positions}
         if hasattr(self, 'start_node'):
             self.distances[self.start_node] = 0
@@ -989,7 +1026,7 @@ class ModernGraphVisualizer(QMainWindow):
         self.bellman_iteration = 0
         self.bellman_edge_index = 0
         self.bellman_changed = False
-        self.bellman_edges = self.get_edges_list()  # Получаем список всех ребер
+        self.bellman_edges = self.get_edges_list()
         
         # Для Дейкстры
         if self.dijkstra_radio.isChecked():
@@ -999,7 +1036,7 @@ class ModernGraphVisualizer(QMainWindow):
         self.current_history_index = -1
         self.save_state("Инициализация: расстояния установлены в бесконечность, кроме стартовой вершины")
         self.update_results_table()
-        self.update_progress()  # Обновляем прогресс при инициализации
+        self.update_progress()
 
     def get_edges_list(self):
         """Получить список всех ребер для Беллмана-Форда"""
@@ -1091,18 +1128,12 @@ class ModernGraphVisualizer(QMainWindow):
             self.finalize_algorithm()
 
     def bellman_ford_step(self):
-        """Правильная реализация алгоритма Беллмана-Форда"""
-        # Шаг 2: |V| - 1 итераций релаксации ребер
+        """Алгоритм Беллмана-Форда"""
         if self.bellman_iteration < len(self.positions) - 1:
             if self.bellman_edge_index < len(self.bellman_edges):
                 u, v, weight = self.bellman_edges[self.bellman_edge_index]
                 self.current_node = u
                 
-                # Анимация текущего ребра
-                if self.animation_speed >= 200:
-                    self.animate_edge(u, v, weight)
-                
-                # Релаксация ребра
                 if self.distances[u] != float('inf') and self.distances[u] + weight < self.distances[v]:
                     old_dist = self.distances[v]
                     self.distances[v] = self.distances[u] + weight
@@ -1111,15 +1142,10 @@ class ModernGraphVisualizer(QMainWindow):
                     
                     description = f"Итерация {self.bellman_iteration + 1}: Ребро {u}→{v} ({weight}) - обновлено {old_dist:.1f}→{self.distances[v]:.1f}"
                     self.save_state(description)
-                else:
-                    if self.bellman_edge_index % 3 == 0:  # Сохраняем состояние каждые 3 ребра для производительности
-                        description = f"Итерация {self.bellman_iteration + 1}: Ребро {u}→{v} ({weight}) - без изменений"
-                        self.save_state(description)
                 
                 self.bellman_edge_index += 1
                 return True
             else:
-                # Завершили итерацию по всем ребрам
                 if self.bellman_changed:
                     self.bellman_iteration += 1
                     self.bellman_edge_index = 0
@@ -1128,12 +1154,10 @@ class ModernGraphVisualizer(QMainWindow):
                     self.save_state(f"Начало итерации {self.bellman_iteration + 1}")
                     return True
                 else:
-                    # Если на итерации не было изменений, можно завершить досрочно
                     self.bellman_iteration = len(self.positions) - 1
                     self.check_negative_cycle()
                     return True
         else:
-            # Шаг 3: Проверка на отрицательные циклы
             return self.check_negative_cycle()
 
     def check_negative_cycle(self):
@@ -1143,30 +1167,19 @@ class ModernGraphVisualizer(QMainWindow):
             self.current_node = u
             
             if self.distances[u] != float('inf') and self.distances[u] + weight < self.distances[v]:
-                # Обнаружен цикл отрицательного веса
                 self.algorithm_finished = True
                 self.algorithm_result = f"Обнаружен цикл отрицательного веса! Ребро {u}→{v} ({weight})"
                 self.save_state(f"ОШИБКА: {self.algorithm_result}")
-                self.update_progress()  # Обновляем прогресс при завершении
+                self.update_progress()
                 QMessageBox.warning(self, "Обнаружен отрицательный цикл", self.algorithm_result)
                 return False
             
             self.bellman_edge_index += 1
-            if self.bellman_edge_index % 3 == 0:
-                self.save_state(f"Проверка на отрицательные циклы: ребро {u}→{v}")
             return True
         else:
-            # Завершили проверку всех ребер - отрицательных циклов нет
             self.algorithm_finished = True
             self.finalize_algorithm()
             return False
-
-    def animate_edge(self, u, v, weight):
-        """Анимация прохода по ребру"""
-        # В PySide6 анимация реализуется через QPropertyAnimation
-        # Здесь можно добавить визуальное выделение ребра
-        self.current_node = u
-        self.canvas_widget.update()
 
     def finalize_algorithm(self):
         """Завершение алгоритма и построение пути"""
@@ -1176,7 +1189,7 @@ class ModernGraphVisualizer(QMainWindow):
         if self.end_node in self.previous and self.distances[self.end_node] != float('inf'):
             path = []
             current = self.end_node
-            max_steps = len(self.positions)  # Защита от бесконечного цикла
+            max_steps = len(self.positions)
             
             while current != self.start_node and max_steps > 0:
                 path.append(current)
@@ -1200,11 +1213,10 @@ class ModernGraphVisualizer(QMainWindow):
         
         self.save_state(f"Завершено: {self.algorithm_result}")
         self.status_label.setText(self.algorithm_result)
-        self.update_progress()  # Обновляем прогресс при завершении
+        self.update_progress()
 
     def toggle_pause(self):
         self.pause = not self.pause
-        # Исправленная логика переключения иконки паузы
         if not self.pause:
             self.pause_btn.setText("❚❚")
             self.pause_btn.setToolTip("Пауза")
@@ -1239,13 +1251,12 @@ class ModernGraphVisualizer(QMainWindow):
         self.status_label.setText("Алгоритм перезапущен. Нажмите 'Старт' для начала.")
 
     def update_progress(self):
-        """Обновление прогресс-бара с исправленной логикой завершения"""
+        """Обновление прогресс-бара"""
         if not self.positions:
             self.progress_bar.setValue(0)
             return
         
         if self.algorithm_finished:
-            # Когда алгоритм завершен, прогресс-бар должен быть полностью заполнен
             self.progress_bar.setValue(100)
         elif self.dijkstra_radio.isChecked():
             total_nodes = len(self.positions)
@@ -1253,12 +1264,10 @@ class ModernGraphVisualizer(QMainWindow):
             progress = int((visited_nodes / total_nodes) * 100)
             self.progress_bar.setValue(progress)
         else:
-            # Для Беллмана-Форда прогресс по итерациям
             total_iterations = len(self.positions)
             if self.bellman_iteration < total_iterations - 1:
                 progress = int((self.bellman_iteration / (total_iterations - 1)) * 100)
             else:
-                # На этапе проверки отрицательных циклов
                 total_edges = len(self.bellman_edges)
                 if total_edges > 0:
                     progress = 80 + int((self.bellman_edge_index / total_edges) * 20)
