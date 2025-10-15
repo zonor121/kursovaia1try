@@ -397,14 +397,14 @@ class ModernGraphVisualizer(QMainWindow):
         
         top_layout.addStretch(1)
         
-        # Кнопки управления
+        # Кнопки управления с новыми иконками
         control_layout = QHBoxLayout()
         control_layout.setSpacing(8)
         
-        self.step_back_btn = self.create_styled_button("⏪ Назад", self.step_backward)
-        self.step_forward_btn = self.create_styled_button("Вперед ⏩", self.step_forward)
-        self.pause_btn = self.create_styled_button("▶️ Старт", self.toggle_pause)
-        self.restart_btn = self.create_styled_button("🔄 Сброс", self.restart)
+        self.step_back_btn = self.create_control_button("◀◀", "Назад", self.step_backward)
+        self.step_forward_btn = self.create_control_button("▶▶", "Вперед", self.step_forward)
+        self.pause_btn = self.create_control_button("❚❚", "Пауза", self.toggle_pause)  # Исправленная иконка паузы
+        self.restart_btn = self.create_control_button("↺", "Сброс", self.restart)
         
         control_layout.addWidget(self.step_back_btn)
         control_layout.addWidget(self.step_forward_btn)
@@ -430,6 +430,40 @@ class ModernGraphVisualizer(QMainWindow):
         top_layout.addLayout(file_layout)
         
         layout.addWidget(top_frame)
+
+    def create_control_button(self, icon, tooltip, callback):
+        """Создание кнопки управления с монохромной иконкой"""
+        btn = QPushButton(icon)
+        btn.setToolTip(tooltip)
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {self.current_theme['bg_tertiary']};
+                border: 2px solid {self.current_theme['border']};
+                border-radius: 8px;
+                padding: 10px;
+                color: {self.current_theme['text']};
+                font-weight: bold;
+                font-size: 16px;
+                min-width: 50px;
+                min-height: 40px;
+            }}
+            QPushButton:hover {{
+                background: {self.current_theme['accent']};
+                border: 2px solid {self.current_theme['accent_secondary']};
+                color: {self.current_theme['bg']};
+            }}
+            QPushButton:pressed {{
+                background: {self.current_theme['accent_secondary']};
+                border: 2px solid {self.current_theme['accent']};
+            }}
+            QPushButton:disabled {{
+                background: {self.current_theme['bg_secondary']};
+                border: 2px solid {self.current_theme['text_secondary']};
+                color: {self.current_theme['text_secondary']};
+            }}
+        """)
+        btn.clicked.connect(callback)
+        return btn
 
     def create_styled_button(self, text, callback):
         """Создание стилизованной кнопки"""
@@ -491,19 +525,23 @@ class ModernGraphVisualizer(QMainWindow):
         
         right_layout.addWidget(node_group)
         
-        # Группа скорости
+        # Группа скорости с увеличенными отступами
         speed_group = QGroupBox("Скорость анимации")
         speed_group.setStyleSheet(self.get_groupbox_style())
         speed_layout = QVBoxLayout(speed_group)
+        speed_layout.setContentsMargins(12, 15, 12, 15)  # Увеличиваем отступы
+        speed_layout.setSpacing(10)
         
         self.speed_slider = QSlider(Qt.Horizontal)
         self.speed_slider.setRange(0, 5)
         self.speed_slider.setValue(2)
         self.speed_slider.valueChanged.connect(self.change_speed)
         self.speed_slider.setStyleSheet(self.get_slider_style())
+        self.speed_slider.setMinimumHeight(30)  # Увеличиваем высоту слайдера
         speed_layout.addWidget(self.speed_slider)
         
         self.speed_label = QLabel("Средняя скорость")
+        self.speed_label.setStyleSheet(f"color: {self.current_theme['text']}; font-size: 11px; padding: 5px;")
         speed_layout.addWidget(self.speed_label)
         
         right_layout.addWidget(speed_group)
@@ -572,14 +610,19 @@ class ModernGraphVisualizer(QMainWindow):
         
         right_layout.addWidget(results_group)
         
-        # Информация о графе
+        # Информация о графе (убрали пункт "Алгоритм")
         info_group = QGroupBox("Информация о графе")
         info_group.setStyleSheet(self.get_groupbox_style())
         info_layout = QVBoxLayout(info_group)
         
         self.graph_info_label = QLabel("Граф не загружен")
         self.graph_info_label.setWordWrap(True)
-        self.graph_info_label.setStyleSheet(f"color: {self.current_theme['text']}; font-size: 11px;")
+        self.graph_info_label.setStyleSheet(f"""
+            color: {self.current_theme['text']}; 
+            font-size: 11px; 
+            padding: 8px;
+            line-height: 1.4;
+        """)
         info_layout.addWidget(self.graph_info_label)
         
         right_layout.addWidget(info_group)
@@ -635,22 +678,24 @@ class ModernGraphVisualizer(QMainWindow):
         return f"""
             QSlider::groove:horizontal {{
                 border: 1px solid {self.current_theme['border']};
-                height: 6px;
+                height: 8px;
                 background: {self.current_theme['bg_tertiary']};
-                border-radius: 3px;
+                border-radius: 4px;
+                margin: 2px 0px;
             }}
             QSlider::handle:horizontal {{
                 background: {self.current_theme['accent']};
-                border: 1px solid {self.current_theme['accent_secondary']};
-                width: 16px;
-                margin: -6px 0;
-                border-radius: 8px;
+                border: 2px solid {self.current_theme['accent_secondary']};
+                width: 20px;
+                height: 20px;
+                margin: -8px 0px;
+                border-radius: 10px;
             }}
             QSlider::sub-page:horizontal {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 {self.current_theme['accent']}, 
                     stop:1 {self.current_theme['accent_secondary']});
-                border-radius: 3px;
+                border-radius: 4px;
             }}
         """
 
@@ -741,6 +786,7 @@ class ModernGraphVisualizer(QMainWindow):
         self.update_graph_info()
 
     def update_graph_info(self):
+        """Обновление информации о графе (без пункта алгоритм)"""
         nodes_count = len(self.positions)
         edges_count = len(self.graph) // 2
         negative_weights = "Да" if self.has_negative_weights else "Нет"
@@ -784,6 +830,7 @@ class ModernGraphVisualizer(QMainWindow):
         self.has_negative_weights = any(weight < 0 for weight in self.graph.values())
         return self.has_negative_weights
 
+    # Остальные методы остаются без изменений...
     def load_graph_from_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Выберите файл с графом", "", 
@@ -952,6 +999,7 @@ class ModernGraphVisualizer(QMainWindow):
         self.current_history_index = -1
         self.save_state("Инициализация: расстояния установлены в бесконечность, кроме стартовой вершины")
         self.update_results_table()
+        self.update_progress()  # Обновляем прогресс при инициализации
 
     def get_edges_list(self):
         """Получить список всех ребер для Беллмана-Форда"""
@@ -1044,7 +1092,7 @@ class ModernGraphVisualizer(QMainWindow):
 
     def bellman_ford_step(self):
         """Правильная реализация алгоритма Беллмана-Форда"""
-        # Шаг 2: |V| - 1 итерация релаксации ребер
+        # Шаг 2: |V| - 1 итераций релаксации ребер
         if self.bellman_iteration < len(self.positions) - 1:
             if self.bellman_edge_index < len(self.bellman_edges):
                 u, v, weight = self.bellman_edges[self.bellman_edge_index]
@@ -1099,6 +1147,7 @@ class ModernGraphVisualizer(QMainWindow):
                 self.algorithm_finished = True
                 self.algorithm_result = f"Обнаружен цикл отрицательного веса! Ребро {u}→{v} ({weight})"
                 self.save_state(f"ОШИБКА: {self.algorithm_result}")
+                self.update_progress()  # Обновляем прогресс при завершении
                 QMessageBox.warning(self, "Обнаружен отрицательный цикл", self.algorithm_result)
                 return False
             
@@ -1151,10 +1200,17 @@ class ModernGraphVisualizer(QMainWindow):
         
         self.save_state(f"Завершено: {self.algorithm_result}")
         self.status_label.setText(self.algorithm_result)
+        self.update_progress()  # Обновляем прогресс при завершении
 
     def toggle_pause(self):
         self.pause = not self.pause
-        self.pause_btn.setText("⏸️ Пауза" if not self.pause else "▶️ Старт")
+        # Исправленная логика переключения иконки паузы
+        if not self.pause:
+            self.pause_btn.setText("❚❚")
+            self.pause_btn.setToolTip("Пауза")
+        else:
+            self.pause_btn.setText("▶")
+            self.pause_btn.setToolTip("Старт")
         
         if not self.pause:
             self.animation_timer = QTimer()
@@ -1174,7 +1230,8 @@ class ModernGraphVisualizer(QMainWindow):
             self.animation_timer.stop()
         
         self.pause = True
-        self.pause_btn.setText("▶️ Старт")
+        self.pause_btn.setText("▶")
+        self.pause_btn.setToolTip("Старт")
         self.initialize_algorithm()
         self.update_progress()
         self.update_results_table()
@@ -1182,20 +1239,32 @@ class ModernGraphVisualizer(QMainWindow):
         self.status_label.setText("Алгоритм перезапущен. Нажмите 'Старт' для начала.")
 
     def update_progress(self):
+        """Обновление прогресс-бара с исправленной логикой завершения"""
         if not self.positions:
             self.progress_bar.setValue(0)
             return
         
-        if self.dijkstra_radio.isChecked():
+        if self.algorithm_finished:
+            # Когда алгоритм завершен, прогресс-бар должен быть полностью заполнен
+            self.progress_bar.setValue(100)
+        elif self.dijkstra_radio.isChecked():
             total_nodes = len(self.positions)
             visited_nodes = len(self.visited)
             progress = int((visited_nodes / total_nodes) * 100)
+            self.progress_bar.setValue(progress)
         else:
             # Для Беллмана-Форда прогресс по итерациям
             total_iterations = len(self.positions)
-            progress = int((self.bellman_iteration / total_iterations) * 100)
-        
-        self.progress_bar.setValue(progress)
+            if self.bellman_iteration < total_iterations - 1:
+                progress = int((self.bellman_iteration / (total_iterations - 1)) * 100)
+            else:
+                # На этапе проверки отрицательных циклов
+                total_edges = len(self.bellman_edges)
+                if total_edges > 0:
+                    progress = 80 + int((self.bellman_edge_index / total_edges) * 20)
+                else:
+                    progress = 100
+            self.progress_bar.setValue(min(progress, 100))
 
     def update_results_table(self):
         self.results_tree.clear()

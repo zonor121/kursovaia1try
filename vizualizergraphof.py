@@ -1,135 +1,192 @@
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+import sys
 import math
 import heapq
+import random
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+                               QPushButton, QLabel, QComboBox, QRadioButton, QGroupBox,
+                               QFileDialog, QMessageBox, QTreeWidget, QTreeWidgetItem,
+                               QSlider, QSplitter, QFrame, QProgressBar, QButtonGroup)
+from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRect
+from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QFont, QPainterPath, QPalette
+import json
 
-class GraphVisualizerTkinter:
-    def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("Визуализация алгоритмов кратчайшего пути - Tkinter")
-        self.root.geometry("1200x900")
+class GraphCanvas(QWidget):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+        self.setMinimumSize(800, 600)
+        self.setMouseTracking(True)
         
-        # Холст для рисования
-        self.canvas = tk.Canvas(self.root, width=1000, height=600, bg='white', highlightthickness=1, highlightbackground="gray")
-        self.canvas.pack(pady=10)
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
         
-        # Настройки масштабирования
-        self.zoom_level = 1.0
-        self.zoom_factor = 1.1
-        self.pan_start_x = 0
-        self.pan_start_y = 0
-        self.pan_offset_x = 0
-        self.pan_offset_y = 0
-        self.is_panning = False
+        # Фон
+        painter.fillRect(self.rect(), QColor(self.parent.current_theme['canvas_bg']))
         
-        # Привязка событий мыши
-        self.canvas.bind("<MouseWheel>", self.zoom)
-        self.canvas.bind("<Button-4>", self.zoom)
-        self.canvas.bind("<Button-5>", self.zoom)
-        self.canvas.bind("<ButtonPress-2>", self.start_pan)
-        self.canvas.bind("<B2-Motion>", self.pan)
-        self.canvas.bind("<ButtonRelease-2>", self.end_pan)
+        if not self.parent.graph:
+            # Сообщение при отсутствии графа
+            painter.setPen(QColor(self.parent.current_theme['text']))
+            painter.setFont(QFont("Arial", 16, QFont.Bold))
+            painter.drawText(self.rect(), Qt.AlignCenter, "Граф не загружен\nНажмите 'Загрузить' или 'Случайный'")
+            return
         
-        # Панель управления
-        self.control_frame = ttk.Frame(self.root)
-        self.control_frame.pack(pady=10)
+        self.draw_edges(painter)
+        self.draw_nodes(painter)
+        self.draw_legend(painter)
         
-        self.step_forward_btn = ttk.Button(self.control_frame, text="Шаг вперед →", command=self.step_forward)
-        self.step_forward_btn.pack(side=tk.LEFT, padx=5)
+    def draw_edges(self, painter):
+        for (u, v), weight in self.parent.graph.items():
+            if u in self.parent.positions and v in self.parent.positions:
+                x1, y1 = self.parent.get_transformed_position(*self.parent.positions[u])
+                x2, y2 = self.parent.get_transformed_position(*self.parent.positions[v])
+                
+                # Определение стиля ребра
+                pen = QPen()
+                if weight < 0:
+                    pen.setColor(QColor(self.parent.current_theme['danger']))
+                    pen.setWidth(3)
+                elif (self.parent.final_path and u in self.parent.final_path and 
+                      v in self.parent.final_path and 
+                      abs(self.parent.final_path.index(u) - self.parent.final_path.index(v)) == 1):
+                    pen.setColor(QColor(self.parent.current_theme['success']))
+                    pen.setWidth(4)
+                else:
+                    pen.setColor(QColor(self.parent.current_theme['text_secondary']))
+                    pen.setWidth(2)
+                
+                painter.setPen(pen)
+                painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+                
+                # Рисование веса ребра
+                if self.parent.zoom_level > 0.3:
+                    self.draw_edge_weight(painter, x1, y1, x2, y2, weight)
+    
+    def draw_edge_weight(self, painter, x1, y1, x2, y2, weight):
+        mid_x = (x1 + x2) / 2
+        mid_y = (y1 + y2) / 2
+        offset_x = (y2 - y1) * 0.1
+        offset_y = -(x2 - x1) * 0.1
         
-        self.step_backward_btn = ttk.Button(self.control_frame, text="← Шаг назад", command=self.step_backward)
-        self.step_backward_btn.pack(side=tk.LEFT, padx=5)
-        
-        self.pause_btn = ttk.Button(self.control_frame, text="▶️ Продолжить", command=self.toggle_pause)
-        self.pause_btn.pack(side=tk.LEFT, padx=5)
-        
-        self.restart_btn = ttk.Button(self.control_frame, text="🔄 Перезапуск", command=self.restart)
-        self.restart_btn.pack(side=tk.LEFT, padx=5)
-        
-        self.load_graph_btn = ttk.Button(self.control_frame, text="📁 Загрузить граф", command=self.load_graph_from_file)
-        self.load_graph_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Кнопки масштабирования
-        self.zoom_in_btn = ttk.Button(self.control_frame, text="➕ Приблизить", command=lambda: self.zoom_manual(1))
-        self.zoom_in_btn.pack(side=tk.LEFT, padx=5)
-        
-        self.zoom_out_btn = ttk.Button(self.control_frame, text="➖ Отдалить", command=lambda: self.zoom_manual(-1))
-        self.zoom_out_btn.pack(side=tk.LEFT, padx=5)
-        
-        self.reset_view_btn = ttk.Button(self.control_frame, text="🗘 Сброс вида", command=self.reset_view)
-        self.reset_view_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Выбор алгоритма
-        self.algorithm_var = tk.StringVar(value="dijkstra")
-        algo_frame = ttk.Frame(self.control_frame)
-        algo_frame.pack(side=tk.LEFT, padx=20)
-        
-        self.dijkstra_radio = ttk.Radiobutton(algo_frame, text="Дейкстра", variable=self.algorithm_var, value="dijkstra", command=self.on_algorithm_change)
-        self.dijkstra_radio.pack(side=tk.LEFT)
-        
-        self.bellman_radio = ttk.Radiobutton(algo_frame, text="Беллман-Форд", variable=self.algorithm_var, value="bellman", command=self.on_algorithm_change)
-        self.bellman_radio.pack(side=tk.LEFT)
-        
-        # Панель выбора начальной и конечной точек
-        self.selection_frame = ttk.Frame(self.root)
-        self.selection_frame.pack(pady=5)
-        
-        ttk.Label(self.selection_frame, text="Старт:", font=('Arial', 10)).pack(side=tk.LEFT, padx=5)
-        self.start_var = tk.StringVar()
-        self.start_combo = ttk.Combobox(self.selection_frame, textvariable=self.start_var, width=5, state="readonly")
-        self.start_combo.pack(side=tk.LEFT, padx=5)
-        self.start_combo.bind('<<ComboboxSelected>>', self.on_start_change)
-        
-        ttk.Label(self.selection_frame, text="Конец:", font=('Arial', 10)).pack(side=tk.LEFT, padx=5)
-        self.end_var = tk.StringVar()
-        self.end_combo = ttk.Combobox(self.selection_frame, textvariable=self.end_var, width=5, state="readonly")
-        self.end_combo.pack(side=tk.LEFT, padx=5)
-        self.end_combo.bind('<<ComboboxSelected>>', self.on_end_change)
-        
-        self.apply_btn = ttk.Button(self.selection_frame, text="Применить", command=self.apply_selection)
-        self.apply_btn.pack(side=tk.LEFT, padx=10)
-        
-        # Панель скорости
-        self.speed_frame = ttk.Frame(self.root)
-        self.speed_frame.pack(pady=5)
-        
-        ttk.Label(self.speed_frame, text="Скорость анимации:", font=('Arial', 10)).pack(side=tk.LEFT, padx=5)
-        
-        self.speed_options = [
-            ("Очень медленно", 2000),
-            ("Медленно", 1000),
-            ("Нормально", 500),
-            ("Быстро", 200),
-            ("Очень быстро", 50),
-            ("Максимальная", 0)
+        painter.setPen(QColor(self.parent.current_theme['text']))
+        painter.setFont(QFont("Arial", max(8, int(10 * self.parent.zoom_level)), QFont.Bold))
+        painter.drawText(int(mid_x + offset_x), int(mid_y + offset_y), str(weight))
+    
+    def draw_nodes(self, painter):
+        for node, (orig_x, orig_y) in self.parent.positions.items():
+            x, y = self.parent.get_transformed_position(orig_x, orig_y)
+            
+            # Определение цвета узла
+            color = self.parent.get_node_color(node)
+            brush = QBrush(QColor(color))
+            
+            # Рисование узла
+            radius = max(15, int(20 * self.parent.zoom_level))
+            painter.setBrush(brush)
+            painter.setPen(QPen(QColor(self.parent.current_theme['border']), 2))
+            painter.drawEllipse(int(x - radius), int(y - radius), radius * 2, radius * 2)
+            
+            # Текст узла
+            text_color = "white" if color in ["#4CAF50", "#F44336", "#bb86fc", "#4caf50", "#ffb74d"] else "black"
+            painter.setPen(QColor(text_color))
+            painter.setFont(QFont("Arial", max(8, int(12 * self.parent.zoom_level)), QFont.Bold))
+            painter.drawText(int(x - radius), int(y - radius), radius * 2, radius * 2, 
+                           Qt.AlignCenter, node)
+            
+            # Отображение расстояния
+            if (node in self.parent.distances and self.parent.distances[node] != float('inf') and 
+                self.parent.zoom_level > 0.5):
+                self.draw_node_distance(painter, x, y, node)
+    
+    def draw_node_distance(self, painter, x, y, node):
+        dist_text = f"{self.parent.distances[node]:.1f}"
+        painter.setPen(QColor(self.parent.current_theme['accent']))
+        painter.setFont(QFont("Arial", max(6, int(10 * self.parent.zoom_level)), QFont.Bold))
+        painter.drawText(int(x + 30 * self.parent.zoom_level), 
+                       int(y - 30 * self.parent.zoom_level), dist_text)
+    
+    def draw_legend(self, painter):
+        legend_x, legend_y = 20, 20
+        legend_items = [
+            ("Текущий узел", self.parent.current_theme['warning']),
+            ("Посещенный", self.parent.current_theme['accent']),
+            ("Кратчайший путь", self.parent.current_theme['success']),
+            ("Старт", "#4CAF50"),
+            ("Финиш", "#F44336"),
+            ("Не посещенный", self.parent.current_theme['text_secondary'])
         ]
         
-        self.speed_var = tk.StringVar(value="Нормально")
-        self.current_speed_delay = 500
+        painter.setFont(QFont("Arial", 10))
         
-        for text, delay in self.speed_options:
-            ttk.Radiobutton(
-                self.speed_frame, 
-                text=text, 
-                variable=self.speed_var, 
-                value=text,
-                command=lambda t=text, d=delay: self.change_speed(t, d)
-            ).pack(side=tk.LEFT, padx=5)
+        for text, color in legend_items:
+            # Квадратик легенды
+            painter.setBrush(QBrush(QColor(color)))
+            painter.setPen(QPen(QColor(self.parent.current_theme['border']), 1))
+            painter.drawRect(legend_x, legend_y, 15, 15)
+            
+            # Текст легенды
+            painter.setPen(QColor(self.parent.current_theme['text']))
+            painter.drawText(legend_x + 25, legend_y + 12, text)
+            legend_y += 25
         
-        # Статус
-        self.status_var = tk.StringVar(value="Программа запущена. Нажмите 'Продолжить' для старта")
-        self.status_label = ttk.Label(self.root, textvariable=self.status_var, font=('Arial', 12))
-        self.status_label.pack(pady=5)
+        # Дополнительная информация
+        if hasattr(self.parent, 'start_node') and hasattr(self.parent, 'end_node'):
+            info_y = legend_y + 20
+            algo_name = "Дейкстра" if self.parent.dijkstra_radio.isChecked() else "Беллман-Форд"
+            
+            painter.setFont(QFont("Arial", 11, QFont.Bold))
+            painter.setPen(QColor(self.parent.current_theme['text']))
+            painter.drawText(20, info_y, f"Алгоритм: {algo_name}")
+            painter.drawText(20, info_y + 25, f"Старт: {self.parent.start_node}, Конец: {self.parent.end_node}")
+            
+            if self.parent.algorithm_finished and self.parent.algorithm_result:
+                result_color = self.parent.current_theme['success'] if "Найден путь" in self.parent.algorithm_result else self.parent.current_theme['danger']
+                painter.setPen(QColor(result_color))
+                result_text = self.parent.algorithm_result.split("(")[0] if "Найден путь" in self.parent.algorithm_result else self.parent.algorithm_result
+                painter.drawText(20, info_y + 50, result_text)
+    
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MiddleButton:
+            self.parent.is_panning = True
+            self.parent.pan_start_x = event.position().x()
+            self.parent.pan_start_y = event.position().y()
+            self.setCursor(Qt.ClosedHandCursor)
+    
+    def mouseMoveEvent(self, event):
+        if self.parent.is_panning:
+            dx = event.position().x() - self.parent.pan_start_x
+            dy = event.position().y() - self.parent.pan_start_y
+            self.parent.pan_offset_x += dx
+            self.parent.pan_offset_y += dy
+            self.parent.pan_start_x = event.position().x()
+            self.parent.pan_start_y = event.position().y()
+            self.update()
+    
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MiddleButton:
+            self.parent.is_panning = False
+            self.setCursor(Qt.ArrowCursor)
+    
+    def wheelEvent(self, event):
+        delta = event.angleDelta().y()
+        if delta > 0:
+            self.parent.zoom_level *= 1.1
+        else:
+            self.parent.zoom_level /= 1.1
         
-        # Таблица результатов для Беллмана-Форда
-        self.results_frame = ttk.Frame(self.root)
-        self.results_frame.pack(pady=5, fill=tk.X, padx=10)
+        self.parent.zoom_level = max(0.1, min(5.0, self.parent.zoom_level))
+        self.update()
+
+class ModernGraphVisualizer(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Визуализация алгоритмов кратчайшего пути - Modern UI")
+        self.setGeometry(100, 100, 1400, 900)
         
-        ttk.Label(self.results_frame, text="Результаты Беллмана-Форда:", font=('Arial', 10, 'bold')).pack(anchor=tk.W)
-        
-        # Создаем Treeview для таблицы
-        self.results_tree = ttk.Treeview(self.results_frame, height=6, show='headings')
-        self.results_tree.pack(fill=tk.X, pady=5)
+        # Настройка темной темы по умолчанию
+        self.dark_mode = True
+        self.setup_themes()
+        self.apply_theme()
         
         # Данные графа
         self.graph = {}
@@ -139,189 +196,645 @@ class GraphVisualizerTkinter:
         self.current_history_index = -1
         self.pause = True
         self.algorithm_finished = False
-        self.auto_animation_id = None
         self.algorithm_result = ""
         self.has_negative_weights = False
+        self.animation_lines = []
         
-        # Инициализация
+        # Настройки анимации
+        self.animation_speed = 500
+        self.zoom_level = 1.0
+        self.pan_offset_x = 0
+        self.pan_offset_y = 0
+        self.is_panning = False
+        
+        # Переменные для алгоритма Беллмана-Форда
+        self.bellman_iteration = 0
+        self.bellman_edge_index = 0
+        self.bellman_changed = False
+        
+        self.setup_ui()
         self.initialize_default_graph()
         self.initialize_algorithm()
-    
-    def update_results_table(self):
-        """Обновляет таблицу результатов для Беллмана-Форда"""
-        # Очищаем таблицу
-        for item in self.results_tree.get_children():
-            self.results_tree.delete(item)
+
+    def setup_themes(self):
+        """Настройка цветовых тем"""
+        self.themes = {
+            'dark': {
+                'bg': '#1e1e1e',
+                'bg_secondary': '#2d2d2d',
+                'bg_tertiary': '#3d3d3d',
+                'text': '#ffffff',
+                'text_secondary': '#cccccc',
+                'accent': '#bb86fc',
+                'accent_secondary': '#03dac6',
+                'danger': '#cf6679',
+                'warning': '#ffb74d',
+                'success': '#4caf50',
+                'border': '#444444',
+                'canvas_bg': '#121212'
+            },
+            'light': {
+                'bg': '#ffffff',
+                'bg_secondary': '#f5f5f5',
+                'bg_tertiary': '#eeeeee',
+                'text': '#212121',
+                'text_secondary': '#757575',
+                'accent': '#6200ee',
+                'accent_secondary': '#018786',
+                'danger': '#b00020',
+                'warning': '#ff9800',
+                'success': '#4caf50',
+                'border': '#e0e0e0',
+                'canvas_bg': '#fafafa'
+            }
+        }
+        self.current_theme = self.themes['dark']
+
+    def apply_theme(self):
+        """Применение текущей темы"""
+        palette = QPalette()
+        if self.dark_mode:
+            palette.setColor(QPalette.Window, QColor(self.current_theme['bg']))
+            palette.setColor(QPalette.WindowText, QColor(self.current_theme['text']))
+            palette.setColor(QPalette.Base, QColor(self.current_theme['bg_secondary']))
+            palette.setColor(QPalette.AlternateBase, QColor(self.current_theme['bg_tertiary']))
+            palette.setColor(QPalette.ToolTipBase, QColor(self.current_theme['bg']))
+            palette.setColor(QPalette.ToolTipText, QColor(self.current_theme['text']))
+            palette.setColor(QPalette.Text, QColor(self.current_theme['text']))
+            palette.setColor(QPalette.Button, QColor(self.current_theme['bg_secondary']))
+            palette.setColor(QPalette.ButtonText, QColor(self.current_theme['text']))
+            palette.setColor(QPalette.BrightText, Qt.red)
+            palette.setColor(QPalette.Link, QColor(self.current_theme['accent']))
+            palette.setColor(QPalette.Highlight, QColor(self.current_theme['accent']))
+            palette.setColor(QPalette.HighlightedText, Qt.black)
+        else:
+            palette.setColor(QPalette.Window, QColor(self.current_theme['bg']))
+            palette.setColor(QPalette.WindowText, QColor(self.current_theme['text']))
+            palette.setColor(QPalette.Base, QColor(self.current_theme['bg_secondary']))
+            palette.setColor(QPalette.AlternateBase, QColor(self.current_theme['bg_tertiary']))
+            palette.setColor(QPalette.ToolTipBase, QColor(self.current_theme['bg']))
+            palette.setColor(QPalette.ToolTipText, QColor(self.current_theme['text']))
+            palette.setColor(QPalette.Text, QColor(self.current_theme['text']))
+            palette.setColor(QPalette.Button, QColor(self.current_theme['bg_secondary']))
+            palette.setColor(QPalette.ButtonText, QColor(self.current_theme['text']))
+            palette.setColor(QPalette.BrightText, Qt.red)
+            palette.setColor(QPalette.Link, QColor(self.current_theme['accent']))
+            palette.setColor(QPalette.Highlight, QColor(self.current_theme['accent']))
+            palette.setColor(QPalette.HighlightedText, Qt.white)
         
-        # Настраиваем колонки
-        self.results_tree['columns'] = ('node', 'distance', 'path')
-        self.results_tree.column('node', width=80, anchor=tk.CENTER)
-        self.results_tree.column('distance', width=120, anchor=tk.CENTER)
-        self.results_tree.column('path', width=200, anchor=tk.W)
+        QApplication.setPalette(palette)
+
+    def setup_ui(self):
+        """Настройка пользовательского интерфейса"""
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+
+        # Верхняя панель управления
+        self.create_top_panel(layout)
         
-        self.results_tree.heading('node', text='Вершина')
-        self.results_tree.heading('distance', text='Расстояние')
-        self.results_tree.heading('path', text='Путь')
+        # Разделитель для основной области
+        splitter = QSplitter(Qt.Horizontal)
+        layout.addWidget(splitter)
         
-        # Заполняем таблицу данными
-        if hasattr(self, 'distances') and hasattr(self, 'start_node'):
-            for node in sorted(self.distances.keys()):
-                distance = self.distances[node]
-                if distance == float('inf'):
-                    distance_str = "∞"
-                    path_str = "Недостижима"
-                else:
-                    distance_str = f"{distance:.1f}"
-                    # Восстанавливаем путь для этой вершины
-                    path = self.reconstruct_path_to_node(node)
-                    path_str = " → ".join(path) if path else "Старт"
-                
-                self.results_tree.insert('', 'end', values=(node, distance_str, path_str))
-    
-    def reconstruct_path_to_node(self, target_node):
-        """Восстанавливает путь до указанной вершины"""
-        if not hasattr(self, 'start_node') or not hasattr(self, 'previous'):
-            return []
+        # Левая панель - холст
+        self.canvas_widget = GraphCanvas(self)
+        splitter.addWidget(self.canvas_widget)
         
-        if target_node == self.start_node:
-            return [self.start_node]
+        # Правая панель - управление и информация
+        right_panel = self.create_right_panel()
+        splitter.addWidget(right_panel)
         
-        if target_node not in self.previous or self.distances[target_node] == float('inf'):
-            return []
+        # Нижняя панель статуса
+        self.create_status_bar()
         
-        path = []
-        current = target_node
-        while current != self.start_node:
-            path.append(current)
-            if current not in self.previous:
-                return []
-            current = self.previous[current]
-        path.append(self.start_node)
-        path.reverse()
-        return path
-    
+        # Настройка пропорций разделителя
+        splitter.setSizes([1000, 400])
+
+    def create_top_panel(self, layout):
+        """Создание верхней панели управления"""
+        top_frame = QFrame()
+        top_frame.setMaximumHeight(100)
+        top_frame.setStyleSheet(f"""
+            QFrame {{
+                background: {self.current_theme['bg_secondary']};
+                border: 1px solid {self.current_theme['border']};
+                border-radius: 8px;
+                padding: 8px;
+            }}
+        """)
+        
+        top_layout = QHBoxLayout(top_frame)
+        top_layout.setSpacing(15)
+        
+        # Группа алгоритмов
+        algo_group = QGroupBox("Выбор алгоритма")
+        algo_group.setStyleSheet(f"""
+            QGroupBox {{
+                color: {self.current_theme['accent']};
+                font-weight: bold;
+                font-size: 12px;
+                border: 1px solid {self.current_theme['border']};
+                border-radius: 6px;
+                margin-top: 6px;
+                padding-top: 8px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }}
+        """)
+        algo_layout = QHBoxLayout(algo_group)
+        algo_layout.setSpacing(10)
+        
+        self.algorithm_group = QButtonGroup(self)
+        
+        self.dijkstra_radio = QRadioButton("Дейкстра")
+        self.bellman_radio = QRadioButton("Беллман-Форд")
+        self.dijkstra_radio.setChecked(True)
+        
+        radio_style = f"""
+            QRadioButton {{
+                color: {self.current_theme['text']};
+                font-weight: normal;
+                font-size: 11px;
+                padding: 4px 8px;
+                border: 1px solid transparent;
+                border-radius: 4px;
+            }}
+            QRadioButton:hover {{
+                background: {self.current_theme['bg_tertiary']};
+                border: 1px solid {self.current_theme['accent']};
+            }}
+            QRadioButton::indicator {{
+                width: 14px;
+                height: 14px;
+            }}
+            QRadioButton::indicator::unchecked {{
+                border: 2px solid {self.current_theme['text_secondary']};
+                border-radius: 7px;
+                background: {self.current_theme['bg_tertiary']};
+            }}
+            QRadioButton::indicator::checked {{
+                border: 2px solid {self.current_theme['accent']};
+                border-radius: 7px;
+                background: {self.current_theme['accent']};
+            }}
+        """
+        
+        self.dijkstra_radio.setStyleSheet(radio_style)
+        self.bellman_radio.setStyleSheet(radio_style)
+        
+        self.algorithm_group.addButton(self.dijkstra_radio)
+        self.algorithm_group.addButton(self.bellman_radio)
+        
+        algo_layout.addWidget(self.dijkstra_radio)
+        algo_layout.addWidget(self.bellman_radio)
+        top_layout.addWidget(algo_group)
+        
+        top_layout.addStretch(1)
+        
+        # Кнопки управления с новыми иконками
+        control_layout = QHBoxLayout()
+        control_layout.setSpacing(8)
+        
+        self.step_back_btn = self.create_control_button("◀◀", "Назад", self.step_backward)
+        self.step_forward_btn = self.create_control_button("▶▶", "Вперед", self.step_forward)
+        self.pause_btn = self.create_control_button("❚❚", "Пауза", self.toggle_pause)  # Исправленная иконка паузы
+        self.restart_btn = self.create_control_button("↺", "Сброс", self.restart)
+        
+        control_layout.addWidget(self.step_back_btn)
+        control_layout.addWidget(self.step_forward_btn)
+        control_layout.addWidget(self.pause_btn)
+        control_layout.addWidget(self.restart_btn)
+        
+        top_layout.addLayout(control_layout)
+        
+        top_layout.addStretch(1)
+        
+        # Кнопки загрузки
+        file_layout = QHBoxLayout()
+        file_layout.setSpacing(8)
+        
+        self.load_btn = self.create_styled_button("📁 Загрузить", self.load_graph_from_file)
+        self.random_btn = self.create_styled_button("🎲 Случайный", self.generate_random_graph)
+        self.theme_btn = self.create_styled_button("🌙 Тема", self.toggle_theme)
+        
+        file_layout.addWidget(self.load_btn)
+        file_layout.addWidget(self.random_btn)
+        file_layout.addWidget(self.theme_btn)
+        
+        top_layout.addLayout(file_layout)
+        
+        layout.addWidget(top_frame)
+
+    def create_control_button(self, icon, tooltip, callback):
+        """Создание кнопки управления с монохромной иконкой"""
+        btn = QPushButton(icon)
+        btn.setToolTip(tooltip)
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {self.current_theme['bg_tertiary']};
+                border: 2px solid {self.current_theme['border']};
+                border-radius: 8px;
+                padding: 10px;
+                color: {self.current_theme['text']};
+                font-weight: bold;
+                font-size: 16px;
+                min-width: 50px;
+                min-height: 40px;
+            }}
+            QPushButton:hover {{
+                background: {self.current_theme['accent']};
+                border: 2px solid {self.current_theme['accent_secondary']};
+                color: {self.current_theme['bg']};
+            }}
+            QPushButton:pressed {{
+                background: {self.current_theme['accent_secondary']};
+                border: 2px solid {self.current_theme['accent']};
+            }}
+            QPushButton:disabled {{
+                background: {self.current_theme['bg_secondary']};
+                border: 2px solid {self.current_theme['text_secondary']};
+                color: {self.current_theme['text_secondary']};
+            }}
+        """)
+        btn.clicked.connect(callback)
+        return btn
+
+    def create_styled_button(self, text, callback):
+        """Создание стилизованной кнопки"""
+        btn = QPushButton(text)
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {self.current_theme['bg_tertiary']}, 
+                    stop:1 {self.current_theme['bg_secondary']});
+                border: 1px solid {self.current_theme['border']};
+                border-radius: 6px;
+                padding: 8px 12px;
+                color: {self.current_theme['text']};
+                font-weight: bold;
+                font-size: 11px;
+                min-width: 80px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {self.current_theme['accent']}, 
+                    stop:1 {self.current_theme['accent_secondary']});
+                border: 1px solid {self.current_theme['accent']};
+                color: black;
+            }}
+            QPushButton:pressed {{
+                background: {self.current_theme['accent_secondary']};
+            }}
+        """)
+        btn.clicked.connect(callback)
+        return btn
+
+    def create_right_panel(self):
+        """Создание правой панели управления"""
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setSpacing(15)
+        
+        # Группа выбора узлов
+        node_group = QGroupBox("Выбор узлов")
+        node_group.setStyleSheet(self.get_groupbox_style())
+        node_layout = QVBoxLayout(node_group)
+        
+        start_layout = QHBoxLayout()
+        start_layout.addWidget(QLabel("Старт:"))
+        self.start_combo = QComboBox()
+        self.start_combo.setStyleSheet(self.get_combobox_style())
+        start_layout.addWidget(self.start_combo)
+        node_layout.addLayout(start_layout)
+        
+        end_layout = QHBoxLayout()
+        end_layout.addWidget(QLabel("Конец:"))
+        self.end_combo = QComboBox()
+        self.end_combo.setStyleSheet(self.get_combobox_style())
+        end_layout.addWidget(self.end_combo)
+        node_layout.addLayout(end_layout)
+        
+        self.apply_btn = self.create_styled_button("Применить выбор", self.apply_selection)
+        node_layout.addWidget(self.apply_btn)
+        
+        right_layout.addWidget(node_group)
+        
+        # Группа скорости с увеличенными отступами
+        speed_group = QGroupBox("Скорость анимации")
+        speed_group.setStyleSheet(self.get_groupbox_style())
+        speed_layout = QVBoxLayout(speed_group)
+        speed_layout.setContentsMargins(12, 15, 12, 15)  # Увеличиваем отступы
+        speed_layout.setSpacing(10)
+        
+        self.speed_slider = QSlider(Qt.Horizontal)
+        self.speed_slider.setRange(0, 5)
+        self.speed_slider.setValue(2)
+        self.speed_slider.valueChanged.connect(self.change_speed)
+        self.speed_slider.setStyleSheet(self.get_slider_style())
+        self.speed_slider.setMinimumHeight(30)  # Увеличиваем высоту слайдера
+        speed_layout.addWidget(self.speed_slider)
+        
+        self.speed_label = QLabel("Средняя скорость")
+        self.speed_label.setStyleSheet(f"color: {self.current_theme['text']}; font-size: 11px; padding: 5px;")
+        speed_layout.addWidget(self.speed_label)
+        
+        right_layout.addWidget(speed_group)
+        
+        # Прогресс выполнения
+        progress_group = QGroupBox("Прогресс выполнения")
+        progress_group.setStyleSheet(self.get_groupbox_style())
+        progress_layout = QVBoxLayout(progress_group)
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setStyleSheet(f"""
+            QProgressBar {{
+                border: 2px solid {self.current_theme['border']};
+                border-radius: 5px;
+                text-align: center;
+                background: {self.current_theme['bg_secondary']};
+                color: {self.current_theme['text']};
+                font-weight: bold;
+            }}
+            QProgressBar::chunk {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {self.current_theme['accent']}, 
+                    stop:1 {self.current_theme['accent_secondary']});
+                border-radius: 3px;
+            }}
+        """)
+        progress_layout.addWidget(self.progress_bar)
+        
+        right_layout.addWidget(progress_group)
+        
+        # Таблица результатов
+        results_group = QGroupBox("Результаты")
+        results_group.setStyleSheet(self.get_groupbox_style())
+        results_layout = QVBoxLayout(results_group)
+        
+        self.results_tree = QTreeWidget()
+        self.results_tree.setHeaderLabels(["Вершина", "Расстояние", "Путь"])
+        self.results_tree.setStyleSheet(f"""
+            QTreeWidget {{
+                background: {self.current_theme['bg_secondary']};
+                color: {self.current_theme['text']};
+                border: 1px solid {self.current_theme['border']};
+                border-radius: 5px;
+                font-size: 10px;
+            }}
+            QTreeWidget::item {{
+                padding: 4px;
+                border-bottom: 1px solid {self.current_theme['border']};
+            }}
+            QTreeWidget::item:selected {{
+                background: {self.current_theme['accent']};
+                color: black;
+            }}
+            QHeaderView::section {{
+                background: {self.current_theme['bg_tertiary']};
+                color: {self.current_theme['text']};
+                padding: 6px;
+                border: 1px solid {self.current_theme['border']};
+                font-weight: bold;
+            }}
+        """)
+        self.results_tree.setColumnWidth(0, 80)
+        self.results_tree.setColumnWidth(1, 100)
+        self.results_tree.setColumnWidth(2, 200)
+        results_layout.addWidget(self.results_tree)
+        
+        right_layout.addWidget(results_group)
+        
+        # Информация о графе (убрали пункт "Алгоритм")
+        info_group = QGroupBox("Информация о графе")
+        info_group.setStyleSheet(self.get_groupbox_style())
+        info_layout = QVBoxLayout(info_group)
+        
+        self.graph_info_label = QLabel("Граф не загружен")
+        self.graph_info_label.setWordWrap(True)
+        self.graph_info_label.setStyleSheet(f"""
+            color: {self.current_theme['text']}; 
+            font-size: 11px; 
+            padding: 8px;
+            line-height: 1.4;
+        """)
+        info_layout.addWidget(self.graph_info_label)
+        
+        right_layout.addWidget(info_group)
+        
+        right_layout.addStretch()
+        
+        return right_widget
+
+    def get_groupbox_style(self):
+        return f"""
+            QGroupBox {{
+                color: {self.current_theme['accent']};
+                font-weight: bold;
+                font-size: 12px;
+                border: 1px solid {self.current_theme['border']};
+                border-radius: 6px;
+                margin-top: 6px;
+                padding-top: 8px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }}
+        """
+
+    def get_combobox_style(self):
+        return f"""
+            QComboBox {{
+                background: {self.current_theme['bg_tertiary']};
+                color: {self.current_theme['text']};
+                border: 1px solid {self.current_theme['border']};
+                border-radius: 4px;
+                padding: 4px;
+                min-width: 60px;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: 1px solid {self.current_theme['border']};
+                padding: 4px;
+            }}
+            QComboBox QAbstractItemView {{
+                background: {self.current_theme['bg_secondary']};
+                color: {self.current_theme['text']};
+                selection-background-color: {self.current_theme['accent']};
+            }}
+        """
+
+    def get_slider_style(self):
+        return f"""
+            QSlider::groove:horizontal {{
+                border: 1px solid {self.current_theme['border']};
+                height: 8px;
+                background: {self.current_theme['bg_tertiary']};
+                border-radius: 4px;
+                margin: 2px 0px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {self.current_theme['accent']};
+                border: 2px solid {self.current_theme['accent_secondary']};
+                width: 20px;
+                height: 20px;
+                margin: -8px 0px;
+                border-radius: 10px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {self.current_theme['accent']}, 
+                    stop:1 {self.current_theme['accent_secondary']});
+                border-radius: 4px;
+            }}
+        """
+
+    def create_status_bar(self):
+        self.status_bar = self.statusBar()
+        self.status_label = QLabel("Готов к работе. Загрузите граф или создайте случайный.")
+        self.status_bar.addWidget(self.status_label)
+        
+        self.status_bar.setStyleSheet(f"""
+            QStatusBar {{
+                background: {self.current_theme['bg_secondary']};
+                color: {self.current_theme['text']};
+                border-top: 1px solid {self.current_theme['border']};
+                font-size: 11px;
+            }}
+        """)
+
+    def get_node_color(self, node):
+        if hasattr(self, 'start_node') and node == self.start_node:
+            return "#4CAF50"
+        if hasattr(self, 'end_node') and node == self.end_node:
+            return "#F44336"
+        if node == self.current_node:
+            return self.current_theme['warning']
+        if node in self.visited:
+            return self.current_theme['accent']
+        if self.final_path and node in self.final_path:
+            return self.current_theme['success']
+        return self.current_theme['text_secondary']
+
+    def get_transformed_position(self, x, y):
+        center_x, center_y = self.canvas_widget.width() // 2, self.canvas_widget.height() // 2
+        transformed_x = center_x + (x - center_x + self.pan_offset_x) * self.zoom_level
+        transformed_y = center_y + (y - center_y + self.pan_offset_y) * self.zoom_level
+        return transformed_x, transformed_y
+
+    def toggle_theme(self):
+        self.dark_mode = not self.dark_mode
+        self.current_theme = self.themes['dark'] if self.dark_mode else self.themes['light']
+        self.apply_theme()
+        self.theme_btn.setText("☀️ Светлая" if self.dark_mode else "🌙 Тёмная")
+        self.canvas_widget.update()
+
+    def change_speed(self, value):
+        speeds = ["Очень медленно", "Медленно", "Средняя", "Быстро", "Очень быстро", "Максимум"]
+        delays = [2000, 1000, 500, 200, 50, 0]
+        self.animation_speed = delays[value]
+        self.speed_label.setText(f"{speeds[value]} ({delays[value]}мс/шаг)")
+
+    def initialize_default_graph(self):
+        edges = [
+            ('A', 'B', 4), ('B', 'C', 3), ('C', 'D', 5), 
+            ('D', 'E', 2), ('E', 'F', 6), ('F', 'A', 4),
+            ('B', 'E', 7), ('C', 'F', 3), ('A', 'D', 8),
+            ('G', 'A', 2), ('G', 'B', 5), ('H', 'C', 4),
+            ('H', 'D', 3), ('I', 'E', 6), ('I', 'F', 2),
+            ('G', 'H', 8), ('H', 'I', 5), ('I', 'G', 7),
+        ]
+        
+        self.graph = {}
+        for u, v, weight in edges:
+            self.graph[(u, v)] = weight
+            self.graph[(v, u)] = weight
+        
+        center_x, center_y = 400, 300
+        
+        inner_nodes = ['A', 'B', 'C', 'D', 'E', 'F']
+        for i, node in enumerate(inner_nodes):
+            angle = 2 * math.pi * i / len(inner_nodes)
+            self.positions[node] = (
+                center_x + 120 * math.cos(angle),
+                center_y + 120 * math.sin(angle)
+            )
+        
+        middle_nodes = ['G', 'H', 'I']
+        for i, node in enumerate(middle_nodes):
+            angle = 2 * math.pi * i / len(middle_nodes) - math.pi/6
+            self.positions[node] = (
+                center_x + 250 * math.cos(angle),
+                center_y + 250 * math.sin(angle)
+            )
+        
+        self.start_node = 'G'
+        self.end_node = 'D'
+        self.original_positions = self.positions.copy()
+        self.check_negative_weights()
+        self.update_selection_comboboxes()
+        self.update_graph_info()
+
+    def update_graph_info(self):
+        """Обновление информации о графе (без пункта алгоритм)"""
+        nodes_count = len(self.positions)
+        edges_count = len(self.graph) // 2
+        negative_weights = "Да" if self.has_negative_weights else "Нет"
+        
+        info_text = f"""Узлов: {nodes_count}
+Ребер: {edges_count}
+Отрицательные веса: {negative_weights}"""
+        
+        self.graph_info_label.setText(info_text)
+
     def update_selection_comboboxes(self):
-        """Обновляет списки выбора начальной и конечной точек"""
         if self.positions:
             nodes = list(self.positions.keys())
-            self.start_combo['values'] = nodes
-            self.end_combo['values'] = nodes
+            self.start_combo.clear()
+            self.end_combo.clear()
+            self.start_combo.addItems(nodes)
+            self.end_combo.addItems(nodes)
             
-            # Устанавливаем значения по умолчанию если они не установлены
-            if not self.start_var.get() and hasattr(self, 'start_node'):
-                self.start_var.set(self.start_node)
-            if not self.end_var.get() and hasattr(self, 'end_node'):
-                self.end_var.set(self.end_node)
-    
-    def on_start_change(self, event=None):
-        """Обрабатывает изменение начальной точки"""
-        new_start = self.start_var.get()
-        if new_start and hasattr(self, 'start_node') and new_start != self.start_node:
-            self.start_node = new_start
-            self.status_var.set(f"Стартовая точка изменена на: {new_start}")
-            self.restart()
-    
-    def on_end_change(self, event=None):
-        """Обрабатывает изменение конечной точки"""
-        new_end = self.end_var.get()
-        if new_end and hasattr(self, 'end_node') and new_end != self.end_node:
-            self.end_node = new_end
-            self.status_var.set(f"Конечная точка изменена на: {new_end}")
-            self.restart()
-    
+            if hasattr(self, 'start_node'):
+                self.start_combo.setCurrentText(self.start_node)
+            if hasattr(self, 'end_node'):
+                self.end_combo.setCurrentText(self.end_node)
+
     def apply_selection(self):
-        """Применяет выбранные начальную и конечную точки"""
-        start = self.start_var.get()
-        end = self.end_var.get()
+        start = self.start_combo.currentText()
+        end = self.end_combo.currentText()
         
         if not start or not end:
-            messagebox.showwarning("Предупреждение", "Выберите начальную и конечную точки")
+            QMessageBox.warning(self, "Предупреждение", "Выберите начальную и конечную точки")
             return
         
         if start == end:
-            messagebox.showwarning("Предупреждение", "Начальная и конечная точки не могут совпадать")
+            QMessageBox.warning(self, "Предупреждение", "Начальная и конечная точки не могут совпадать")
             return
         
         self.start_node = start
         self.end_node = end
-        self.status_var.set(f"Установлены: Старт={start}, Конец={end}")
         self.restart()
-    
+
     def check_negative_weights(self):
-        """Проверяет наличие отрицательных весов в графе"""
         self.has_negative_weights = any(weight < 0 for weight in self.graph.values())
         return self.has_negative_weights
-    
-    def on_algorithm_change(self):
-        """Обрабатывает изменение выбора алгоритма"""
-        if self.algorithm_var.get() == "dijkstra" and self.has_negative_weights:
-            messagebox.showwarning(
-                "Предупреждение", 
-                "Алгоритм Дейкстры не работает с отрицательными весами!\n"
-                "Автоматически переключен на алгоритм Беллмана-Форда."
-            )
-            self.algorithm_var.set("bellman")
-        
-        # Показываем/скрываем таблицу результатов в зависимости от алгоритма
-        if self.algorithm_var.get() == "bellman":
-            self.results_frame.pack(pady=5, fill=tk.X, padx=10)
-        else:
-            self.results_frame.pack_forget()
-        
-        self.restart()
-    
-    def zoom(self, event):
-        if event.delta > 0 or event.num == 4:
-            self.zoom_level *= self.zoom_factor
-        else:
-            self.zoom_level /= self.zoom_factor
-        
-        self.zoom_level = max(0.1, min(5.0, self.zoom_level))
-        self.draw_graph()
-    
-    def zoom_manual(self, direction):
-        if direction > 0:
-            self.zoom_level *= self.zoom_factor
-        else:
-            self.zoom_level /= self.zoom_factor
-        
-        self.zoom_level = max(0.1, min(5.0, self.zoom_level))
-        self.draw_graph()
-    
-    def reset_view(self):
-        self.zoom_level = 1.0
-        self.pan_offset_x = 0
-        self.pan_offset_y = 0
-        self.draw_graph()
-    
-    def start_pan(self, event):
-        self.is_panning = True
-        self.pan_start_x = event.x
-        self.pan_start_y = event.y
-    
-    def pan(self, event):
-        if self.is_panning:
-            dx = event.x - self.pan_start_x
-            dy = event.y - self.pan_start_y
-            self.pan_offset_x += dx
-            self.pan_offset_y += dy
-            self.pan_start_x = event.x
-            self.pan_start_y = event.y
-            self.draw_graph()
-    
-    def end_pan(self, event):
-        self.is_panning = False
-    
-    def get_transformed_position(self, x, y):
-        center_x, center_y = 500, 300
-        transformed_x = center_x + (x - center_x + self.pan_offset_x) * self.zoom_level
-        transformed_y = center_y + (y - center_y + self.pan_offset_y) * self.zoom_level
-        return transformed_x, transformed_y
-    
+
+    # Остальные методы остаются без изменений...
     def load_graph_from_file(self):
-        file_path = filedialog.askopenfilename(
-            title="Выберите файл с графом",
-            filetypes=[("Текстовые файлы", "*.txt"), ("Все файлы", "*.*")]
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите файл с графом", "", 
+            "Текстовые файлы (*.txt);;Все файлы (*)"
         )
         
         if not file_path:
@@ -357,7 +870,7 @@ class GraphVisualizerTkinter:
                         print(f"Ошибка в весе ребра: {line}")
             
             if not edges:
-                messagebox.showerror("Ошибка", "Файл не содержит корректных ребер графа")
+                QMessageBox.critical(self, "Ошибка", "Файл не содержит корректных ребер графа")
                 return
             
             self.graph = {}
@@ -367,51 +880,41 @@ class GraphVisualizerTkinter:
             
             self.calculate_positions()
             
-            # Устанавливаем старт и финиш из файла или по умолчанию
             self.start_node = start_node if start_node else list(self.positions.keys())[0]
             self.end_node = end_node if end_node else list(self.positions.keys())[-1]
             
             self.original_positions = self.positions.copy()
-            
-            # Обновляем комбобоксы выбора
             self.update_selection_comboboxes()
             
-            # Проверяем отрицательные веса
             has_negative = self.check_negative_weights()
             
-            # Если есть отрицательные веса и выбран Дейкстра - переключаем
-            if has_negative and self.algorithm_var.get() == "dijkstra":
-                messagebox.showwarning(
-                    "Предупреждение", 
+            if has_negative and self.dijkstra_radio.isChecked():
+                QMessageBox.warning(
+                    self, "Предупреждение", 
                     "Обнаружены отрицательные веса!\n"
                     "Алгоритм Дейкстры не работает с отрицательными весами.\n"
                     "Автоматически переключен на алгоритм Беллмана-Форда."
                 )
-                self.algorithm_var.set("bellman")
-            
-            # Показываем/скрываем таблицу результатов
-            if self.algorithm_var.get() == "bellman":
-                self.results_frame.pack(pady=5, fill=tk.X, padx=10)
-            else:
-                self.results_frame.pack_forget()
+                self.bellman_radio.setChecked(True)
             
             self.restart()
+            self.update_graph_info()
             
             message_text = f"Граф загружен!\nРебер: {len(edges)}\nУзлов: {len(self.positions)}\nСтарт: {self.start_node}, Конец: {self.end_node}"
             if has_negative:
                 message_text += f"\n⚠️ Обнаружены отрицательные веса!"
             
-            messagebox.showinfo("Успех", message_text)
+            QMessageBox.information(self, "Успех", message_text)
             
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось загрузить файл:\n{str(e)}")
-    
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл:\n{str(e)}")
+
     def calculate_positions(self):
         nodes = list(set([node for edge in self.graph.keys() for node in edge]))
         self.positions = {}
         
-        center_x, center_y = 500, 300
-        radius = min(400, 50 * len(nodes))
+        center_x, center_y = 400, 300
+        radius = min(300, 40 * len(nodes))
         
         for i, node in enumerate(nodes):
             angle = 2 * math.pi * i / len(nodes)
@@ -421,60 +924,60 @@ class GraphVisualizerTkinter:
             )
         
         self.original_positions = self.positions.copy()
-    
-    def initialize_default_graph(self):
-        edges = [
-            ('A', 'B', 4), ('B', 'C', 3), ('C', 'D', 5), 
-            ('D', 'E', 2), ('E', 'F', 6), ('F', 'A', 4),
-            ('B', 'E', 7), ('C', 'F', 3), ('A', 'D', 8),
-            ('G', 'A', 2), ('G', 'B', 5), ('H', 'C', 4),
-            ('H', 'D', 3), ('I', 'E', 6), ('I', 'F', 2),
-            ('G', 'H', 8), ('H', 'I', 5), ('I', 'G', 7),
-        ]
+
+    def generate_random_graph(self):
+        nodes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
+        num_nodes = random.randint(6, 8)
+        selected_nodes = nodes[:num_nodes]
         
         self.graph = {}
-        for u, v, weight in edges:
+        
+        # Создаем базовую связность
+        for i in range(len(selected_nodes) - 1):
+            u = selected_nodes[i]
+            v = selected_nodes[i + 1]
+            weight = random.randint(1, 10)
             self.graph[(u, v)] = weight
             self.graph[(v, u)] = weight
         
-        center_x, center_y = 500, 300
+        # Добавляем случайные ребра
+        num_extra_edges = random.randint(num_nodes, num_nodes + 3)
+        for _ in range(num_extra_edges):
+            u = random.choice(selected_nodes)
+            v = random.choice(selected_nodes)
+            if u != v and (u, v) not in self.graph:
+                weight = random.randint(1, 10)
+                if random.random() < 0.1:
+                    weight = -random.randint(1, 3)
+                self.graph[(u, v)] = weight
+                self.graph[(v, u)] = weight
         
-        inner_nodes = ['A', 'B', 'C', 'D', 'E', 'F']
-        for i, node in enumerate(inner_nodes):
-            angle = 2 * math.pi * i / len(inner_nodes)
-            self.positions[node] = (
-                center_x + 120 * math.cos(angle),
-                center_y + 120 * math.sin(angle)
-            )
-        
-        middle_nodes = ['G', 'H', 'I']
-        for i, node in enumerate(middle_nodes):
-            angle = 2 * math.pi * i / len(middle_nodes) - math.pi/6
-            self.positions[node] = (
-                center_x + 250 * math.cos(angle),
-                center_y + 250 * math.sin(angle)
-            )
-        
-        self.start_node = 'G'
-        self.end_node = 'D'
+        self.calculate_positions()
+        self.start_node = random.choice(selected_nodes)
+        self.end_node = random.choice([n for n in selected_nodes if n != self.start_node])
         self.original_positions = self.positions.copy()
-        self.check_negative_weights()
         self.update_selection_comboboxes()
-    
-    def change_speed(self, speed_name, delay_ms):
-        self.current_speed_delay = delay_ms
-        self.status_var.set(f"Скорость изменена на: {speed_name} ({delay_ms}мс/шаг)")
         
-        if not self.pause and not self.algorithm_finished:
-            if self.auto_animation_id:
-                self.root.after_cancel(self.auto_animation_id)
-            self.auto_animate()
-    
+        has_negative = self.check_negative_weights()
+        if has_negative and self.dijkstra_radio.isChecked():
+            self.bellman_radio.setChecked(True)
+        
+        self.restart()
+        self.update_graph_info()
+        
+        QMessageBox.information(self, "Случайный граф", 
+                               f"Сгенерирован случайный граф!\n"
+                               f"Узлов: {len(selected_nodes)}\n"
+                               f"Ребер: {len(self.graph)//2}\n"
+                               f"Старт: {self.start_node}, Конец: {self.end_node}")
+
     def initialize_algorithm(self):
+        """Инициализация алгоритма согласно правильному описанию"""
         # Шаг 1: Инициализация расстояний
         self.distances = {node: float('inf') for node in self.positions}
         if hasattr(self, 'start_node'):
             self.distances[self.start_node] = 0
+        
         self.visited = set()
         self.previous = {}
         self.current_node = None
@@ -482,445 +985,329 @@ class GraphVisualizerTkinter:
         self.algorithm_finished = False
         self.algorithm_result = ""
         
-        if self.algorithm_var.get() == "dijkstra" and hasattr(self, 'start_node'):
-            self.pq = [(0, self.start_node)]
-        else:
-            # Для Беллмана-Форда создаем список всех ребер
-            self.edges = self.get_edges_list()
-            self.iteration = 0
-            self.edge_index = 0
-            self.relaxation_occurred = False
+        # Для Беллмана-Форда
+        self.bellman_iteration = 0
+        self.bellman_edge_index = 0
+        self.bellman_changed = False
+        self.bellman_edges = self.get_edges_list()  # Получаем список всех ребер
         
-        self.history.clear()
-        self.save_state("Шаг 1: Инициализация расстояний")
+        # Для Дейкстры
+        if self.dijkstra_radio.isChecked():
+            self.queue = [(0, self.start_node)]
         
-        # Обновляем таблицу результатов для Беллмана-Форда
-        if self.algorithm_var.get() == "bellman":
-            self.update_results_table()
-    
+        self.history = []
+        self.current_history_index = -1
+        self.save_state("Инициализация: расстояния установлены в бесконечность, кроме стартовой вершины")
+        self.update_results_table()
+        self.update_progress()  # Обновляем прогресс при инициализации
+
     def get_edges_list(self):
-        """Создает список всех ребер для Беллмана-Форда"""
+        """Получить список всех ребер для Беллмана-Форда"""
         edges = []
         for (u, v), weight in self.graph.items():
             edges.append((u, v, weight))
         return edges
-    
-    def get_neighbors(self, node):
-        neighbors = {}
-        for (u, v), weight in self.graph.items():
-            if u == node:
-                neighbors[v] = weight
-            elif v == node:
-                neighbors[u] = weight
-        return neighbors
-    
-    def save_state(self, description):
+
+    def save_state(self, description=""):
         state = {
             'distances': self.distances.copy(),
             'visited': self.visited.copy(),
-            'current_node': self.current_node,
             'previous': self.previous.copy(),
-            'description': description,
+            'current_node': self.current_node,
             'final_path': self.final_path.copy() if self.final_path else None,
             'algorithm_finished': self.algorithm_finished,
-            'algorithm_result': self.algorithm_result
+            'algorithm_result': self.algorithm_result,
+            'bellman_iteration': self.bellman_iteration,
+            'bellman_edge_index': self.bellman_edge_index,
+            'bellman_changed': self.bellman_changed,
+            'description': description
         }
-        if hasattr(self, 'iteration'):
-            state['iteration'] = self.iteration
-            state['edge_index'] = self.edge_index
-            state['relaxation_occurred'] = getattr(self, 'relaxation_occurred', False)
-        
+        self.history = self.history[:self.current_history_index + 1]
         self.history.append(state)
         self.current_history_index = len(self.history) - 1
+
+    def step_forward(self):
+        if self.algorithm_finished:
+            return
         
-        # Обновляем таблицу результатов для Беллмана-Форда
-        if self.algorithm_var.get() == "bellman":
+        if self.dijkstra_radio.isChecked():
+            self.dijkstra_step()
+        else:
+            self.bellman_ford_step()
+        
+        self.update_progress()
+        self.update_results_table()
+        self.canvas_widget.update()
+
+    def step_backward(self):
+        if self.current_history_index > 0:
+            self.current_history_index -= 1
+            self.restore_state()
+            self.update_progress()
             self.update_results_table()
-    
-    def load_state(self, index):
-        if 0 <= index < len(self.history):
-            state = self.history[index]
-            self.distances = state['distances'].copy()
-            self.visited = state['visited'].copy()
-            self.current_node = state['current_node']
-            self.previous = state['previous'].copy()
-            self.final_path = state['final_path'].copy() if state['final_path'] else None
-            self.algorithm_finished = state['algorithm_finished']
-            self.algorithm_result = state['algorithm_result']
-            self.current_history_index = index
-            
-            if 'iteration' in state:
-                self.iteration = state['iteration']
-                self.edge_index = state['edge_index']
-                self.relaxation_occurred = state['relaxation_occurred']
-            
-            # Обновляем таблицу результатов для Беллмана-Форда
-            if self.algorithm_var.get() == "bellman":
-                self.update_results_table()
-            
-            return True
-        return False
-    
+            self.canvas_widget.update()
+
+    def restore_state(self):
+        state = self.history[self.current_history_index]
+        self.distances = state['distances'].copy()
+        self.visited = state['visited'].copy()
+        self.previous = state['previous'].copy()
+        self.current_node = state['current_node']
+        self.final_path = state['final_path'].copy() if state['final_path'] else None
+        self.algorithm_finished = state['algorithm_finished']
+        self.algorithm_result = state['algorithm_result']
+        self.bellman_iteration = state.get('bellman_iteration', 0)
+        self.bellman_edge_index = state.get('bellman_edge_index', 0)
+        self.bellman_changed = state.get('bellman_changed', False)
+
     def dijkstra_step(self):
-        if not hasattr(self, 'pq') or not self.pq:
-            self.algorithm_finished = True
-            self.reconstruct_path()
-            return False
+        """Алгоритм Дейкстры"""
+        if not self.queue:
+            self.finalize_algorithm()
+            return
         
-        current_dist, self.current_node = heapq.heappop(self.pq)
+        current_distance, self.current_node = heapq.heappop(self.queue)
         
         if self.current_node in self.visited:
-            return True
+            return
         
         self.visited.add(self.current_node)
-        self.save_state(f"Обрабатываем узел {self.current_node} (расстояние: {current_dist})")
+        self.save_state(f"Обрабатываем узел {self.current_node} (расстояние: {current_distance})")
         
-        if hasattr(self, 'end_node') and self.current_node == self.end_node:
-            self.algorithm_finished = True
-            self.reconstruct_path()
-            return False
-        
-        neighbors = self.get_neighbors(self.current_node)
+        # Обновляем расстояния до соседей
         updated = False
-        for neighbor, weight in neighbors.items():
-            if neighbor not in self.visited:
-                new_dist = current_dist + weight
-                if new_dist < self.distances[neighbor]:
-                    self.distances[neighbor] = new_dist
-                    heapq.heappush(self.pq, (new_dist, neighbor))
-                    self.previous[neighbor] = self.current_node
+        for (u, v), weight in self.graph.items():
+            if u == self.current_node and v not in self.visited:
+                new_distance = current_distance + weight
+                if new_distance < self.distances[v]:
+                    old_dist = self.distances[v]
+                    self.distances[v] = new_distance
+                    self.previous[v] = u
+                    heapq.heappush(self.queue, (new_distance, v))
                     updated = True
+                    self.save_state(f"Обновлено расстояние до {v}: {old_dist} -> {new_distance}")
         
-        if updated:
-            self.save_state(f"Обновлены расстояния после узла {self.current_node}")
-        
-        return True
-    
+        if self.current_node == self.end_node:
+            self.finalize_algorithm()
+
     def bellman_ford_step(self):
-        """Корректный алгоритм Беллмана-Форда согласно описанию"""
-        if not hasattr(self, 'edges'):
-            return False
-        
-        # Шаг 2: |V|-1 итераций релаксации
-        if self.iteration < len(self.positions) - 1:
-            if self.edge_index < len(self.edges):
-                u, v, weight = self.edges[self.edge_index]
+        """Правильная реализация алгоритма Беллмана-Форда"""
+        # Шаг 2: |V| - 1 итераций релаксации ребер
+        if self.bellman_iteration < len(self.positions) - 1:
+            if self.bellman_edge_index < len(self.bellman_edges):
+                u, v, weight = self.bellman_edges[self.bellman_edge_index]
                 self.current_node = u
                 
-                # Релаксация ребра: если dist[v] > dist[u] + weight(u,v)
+                # Анимация текущего ребра
+                if self.animation_speed >= 200:
+                    self.animate_edge(u, v, weight)
+                
+                # Релаксация ребра
                 if self.distances[u] != float('inf') and self.distances[u] + weight < self.distances[v]:
                     old_dist = self.distances[v]
                     self.distances[v] = self.distances[u] + weight
                     self.previous[v] = u
-                    self.relaxation_occurred = True
-                    self.save_state(f"Итерация {self.iteration+1}: {u}→{v} ({weight}) - обновлено {old_dist:.1f}→{self.distances[v]:.1f}")
+                    self.bellman_changed = True
+                    
+                    description = f"Итерация {self.bellman_iteration + 1}: Ребро {u}→{v} ({weight}) - обновлено {old_dist:.1f}→{self.distances[v]:.1f}"
+                    self.save_state(description)
                 else:
-                    self.save_state(f"Итерация {self.iteration+1}: {u}→{v} ({weight}) - без изменений")
+                    if self.bellman_edge_index % 3 == 0:  # Сохраняем состояние каждые 3 ребра для производительности
+                        description = f"Итерация {self.bellman_iteration + 1}: Ребро {u}→{v} ({weight}) - без изменений"
+                        self.save_state(description)
                 
-                self.edge_index += 1
+                self.bellman_edge_index += 1
                 return True
             else:
-                # Завершили проход по всем ребрам для текущей итерации
-                if self.relaxation_occurred:
-                    # Были изменения - переходим к следующей итерации
-                    self.iteration += 1
-                    self.edge_index = 0
-                    self.relaxation_occurred = False
+                # Завершили итерацию по всем ребрам
+                if self.bellman_changed:
+                    self.bellman_iteration += 1
+                    self.bellman_edge_index = 0
+                    self.bellman_changed = False
                     self.current_node = None
-                    self.save_state(f"Начало итерации {self.iteration+1}")
+                    self.save_state(f"Начало итерации {self.bellman_iteration + 1}")
                     return True
                 else:
-                    # Не было изменений - алгоритм завершен
-                    self.algorithm_finished = True
-                    self.reconstruct_path()
-                    return False
-        
-        # Шаг 3: Проверка на отрицательные циклы
+                    # Если на итерации не было изменений, можно завершить досрочно
+                    self.bellman_iteration = len(self.positions) - 1
+                    self.check_negative_cycle()
+                    return True
         else:
-            if self.edge_index < len(self.edges):
-                u, v, weight = self.edges[self.edge_index]
-                # Если dist[v] > dist[u] + weight(u,v) - найден отрицательный цикл
-                if self.distances[u] != float('inf') and self.distances[u] + weight < self.distances[v]:
-                    self.algorithm_finished = True
-                    self.algorithm_result = f"Обнаружен отрицательный цикл! {u}→{v}"
-                    self.save_state(f"Обнаружен отрицательный цикл! {u}→{v}")
-                    return False
-                self.edge_index += 1
-                return True
-            else:
-                # Алгоритм завершен успешно
-                self.algorithm_finished = True
-                self.reconstruct_path()
-                return False
-    
-    def reconstruct_path(self):
-        if not hasattr(self, 'end_node') or not hasattr(self, 'start_node'):
-            self.final_path = None
-            self.algorithm_result = "Старт или финиш не установлены"
-            self.save_state("Старт или финиш не установлены")
-            return
+            # Шаг 3: Проверка на отрицательные циклы
+            return self.check_negative_cycle()
+
+    def check_negative_cycle(self):
+        """Проверка на наличие циклов отрицательного веса"""
+        if self.bellman_edge_index < len(self.bellman_edges):
+            u, v, weight = self.bellman_edges[self.bellman_edge_index]
+            self.current_node = u
             
-        if self.end_node not in self.previous or self.distances[self.end_node] == float('inf'):
-            self.final_path = None
-            self.algorithm_result = f"Путь от {self.start_node} до {self.end_node} не найден"
-            self.save_state(f"Путь от {self.start_node} до {self.end_node} не найден")
+            if self.distances[u] != float('inf') and self.distances[u] + weight < self.distances[v]:
+                # Обнаружен цикл отрицательного веса
+                self.algorithm_finished = True
+                self.algorithm_result = f"Обнаружен цикл отрицательного веса! Ребро {u}→{v} ({weight})"
+                self.save_state(f"ОШИБКА: {self.algorithm_result}")
+                self.update_progress()  # Обновляем прогресс при завершении
+                QMessageBox.warning(self, "Обнаружен отрицательный цикл", self.algorithm_result)
+                return False
+            
+            self.bellman_edge_index += 1
+            if self.bellman_edge_index % 3 == 0:
+                self.save_state(f"Проверка на отрицательные циклы: ребро {u}→{v}")
+            return True
         else:
+            # Завершили проверку всех ребер - отрицательных циклов нет
+            self.algorithm_finished = True
+            self.finalize_algorithm()
+            return False
+
+    def animate_edge(self, u, v, weight):
+        """Анимация прохода по ребру"""
+        # В PySide6 анимация реализуется через QPropertyAnimation
+        # Здесь можно добавить визуальное выделение ребра
+        self.current_node = u
+        self.canvas_widget.update()
+
+    def finalize_algorithm(self):
+        """Завершение алгоритма и построение пути"""
+        self.algorithm_finished = True
+        self.current_node = None
+        
+        if self.end_node in self.previous and self.distances[self.end_node] != float('inf'):
             path = []
             current = self.end_node
-            while current != self.start_node:
+            max_steps = len(self.positions)  # Защита от бесконечного цикла
+            
+            while current != self.start_node and max_steps > 0:
                 path.append(current)
+                if current not in self.previous:
+                    break
                 current = self.previous[current]
-            path.append(self.start_node)
-            path.reverse()
-            self.final_path = path
-            path_length = self.distances[self.end_node]
-            self.algorithm_result = f"Найден путь: {' → '.join(path)} (длина: {path_length})"
-            self.save_state(f"Найден путь: {' → '.join(path)} (длина: {path_length})")
-    
-    def algorithm_step(self):
-        if not hasattr(self, 'start_node'):
-            messagebox.showwarning("Предупреждение", "Сначала загрузите граф и установите стартовый узел")
-            return False
+                max_steps -= 1
             
-        if self.algorithm_var.get() == "dijkstra":
-            if self.has_negative_weights:
-                messagebox.showerror("Ошибка", "Алгоритм Дейкстры не работает с отрицательными весами!\nИспользуйте алгоритм Беллмана-Форда.")
-                return False
-            return self.dijkstra_step()
+            if max_steps > 0:
+                path.append(self.start_node)
+                path.reverse()
+                self.final_path = path
+                total_distance = self.distances[self.end_node]
+                self.algorithm_result = f"Найден путь: {' -> '.join(path)} (длина: {total_distance})"
+            else:
+                self.final_path = None
+                self.algorithm_result = "Не удалось построить путь"
         else:
-            return self.bellman_ford_step()
-    
-    def draw_graph(self):
-        self.canvas.delete("all")
+            self.final_path = None
+            self.algorithm_result = f"Путь от {self.start_node} до {self.end_node} не найден"
         
-        if not self.graph:
-            self.canvas.create_text(500, 300, text="Граф не загружен\nНажмите 'Загрузить граф'", 
-                                  font=('Arial', 16), fill="gray")
-            return
-        
-        # Рисуем ребра
-        for (u, v), weight in self.graph.items():
-            if u in self.positions and v in self.positions:
-                x1, y1 = self.get_transformed_position(*self.positions[u])
-                x2, y2 = self.get_transformed_position(*self.positions[v])
-                
-                edge_color = "gray"
-                edge_width = max(1, int(2 * self.zoom_level))
-                
-                # Подсвечиваем отрицательные веса красным
-                if weight < 0:
-                    edge_color = "red"
-                    edge_width = max(2, int(3 * self.zoom_level))
-                
-                if self.final_path and u in self.final_path and v in self.final_path:
-                    try:
-                        if abs(self.final_path.index(u) - self.final_path.index(v)) == 1:
-                            edge_color = "blue"
-                            edge_width = max(2, int(4 * self.zoom_level))
-                    except ValueError:
-                        pass
-                
-                self.canvas.create_line(x1, y1, x2, y2, width=edge_width, fill=edge_color)
-                
-                mid_x = (x1 + x2) / 2
-                mid_y = (y1 + y2) / 2
-                offset_x = (y2 - y1) * 0.1
-                offset_y = -(x2 - x1) * 0.1
-                
-                font_size = max(8, int(10 * self.zoom_level))
-                weight_color = "red" if weight < 0 else "darkblue"
-                self.canvas.create_text(
-                    mid_x + offset_x, mid_y + offset_y,
-                    text=str(weight), fill=weight_color,
-                    font=('Arial', font_size, 'bold')
-                )
-        
-        # Рисуем узлы
-        for node, (orig_x, orig_y) in self.positions.items():
-            x, y = self.get_transformed_position(orig_x, orig_y)
-            
-            if node == self.current_node:
-                fill_color = "red"
-            elif node in self.visited:
-                fill_color = "green"
-            elif self.final_path and node in self.final_path:
-                fill_color = "blue"
-            else:
-                fill_color = "lightgray"
-            
-            if hasattr(self, 'start_node') and node == self.start_node:
-                fill_color = "orange"
-            if hasattr(self, 'end_node') and node == self.end_node:
-                fill_color = "purple"
-            
-            node_radius = max(15, int(20 * self.zoom_level))
-            self.canvas.create_oval(
-                x - node_radius, y - node_radius,
-                x + node_radius, y + node_radius,
-                fill=fill_color, outline="black", width=max(1, int(2 * self.zoom_level))
-            )
-            
-            text_color = "white" if fill_color in ["red", "green", "blue", "orange", "purple"] else "black"
-            font_size = max(8, int(12 * self.zoom_level))
-            self.canvas.create_text(x, y, text=node, fill=text_color, font=('Arial', font_size, 'bold'))
-            
-            if node in self.distances and self.distances[node] != float('inf'):
-                dist_text = f"{self.distances[node]:.1f}"
-                dist_font_size = max(6, int(10 * self.zoom_level))
-                self.canvas.create_text(
-                    x + 30 * self.zoom_level, y - 30 * self.zoom_level,
-                    text=dist_text, fill="darkred",
-                    font=('Arial', dist_font_size, 'bold')
-                )
-        
-        # Рисуем легенду
-        self.draw_legend()
-        
-        # Обновляем статус (без информации о масштабе)
-        if self.algorithm_finished and self.algorithm_result:
-            status_text = f"✅ {self.algorithm_result}"
-        elif self.current_history_index >= 0 and self.history:
-            current_state = self.history[self.current_history_index]
-            status_text = f"{current_state['description']} | Шаг {self.current_history_index + 1}/{len(self.history)}"
-            if hasattr(self, 'iteration'):
-                status_text += f" | Итерация: {self.iteration}"
-            
-            if self.pause and not self.algorithm_finished:
-                status_text += " | ⏸️ ПАУЗА"
-        else:
-            status_text = "⏸️ Программа запущена в режиме паузы"
-        
-        self.status_var.set(status_text)
-    
-    def draw_legend(self):
-        legend_x, legend_y = 20, 20
-        legend_items = [
-            ("Текущий узел", "red"),
-            ("Посещенный", "green"),
-            ("Кратчайший путь", "blue"),
-            ("Старт", "orange"),
-            ("Финиш", "purple"),
-            ("Не посещенный", "lightgray")
-        ]
-        
-        # Добавляем пункт для отрицательных весов если они есть
-        if self.has_negative_weights:
-            legend_items.append(("Отрицательный вес", "red"))
-        
-        for text, color in legend_items:
-            self.canvas.create_rectangle(legend_x, legend_y, legend_x + 15, legend_y + 15, fill=color, outline="black")
-            self.canvas.create_text(legend_x + 25, legend_y + 7, text=text, anchor=tk.W, font=('Arial', 10))
-            legend_y += 25
-        
-        if hasattr(self, 'start_node') and hasattr(self, 'end_node'):
-            algo_name = "Дейкстра" if self.algorithm_var.get() == "dijkstra" else "Беллман-Форд"
-            algo_color = "red" if (self.algorithm_var.get() == "dijkstra" and self.has_negative_weights) else "black"
-            self.canvas.create_text(legend_x, legend_y + 10, text=f"Алгоритм: {algo_name}", anchor=tk.W, font=('Arial', 10, 'bold'), fill=algo_color)
-            self.canvas.create_text(legend_x, legend_y + 30, text=f"Старт: {self.start_node}, Конец: {self.end_node}", anchor=tk.W, font=('Arial', 10))
-            
-            speed_text = f"Скорость: {self.speed_var.get()} ({self.current_speed_delay}мс/шаг)"
-            self.canvas.create_text(legend_x, legend_y + 50, text=speed_text, anchor=tk.W, font=('Arial', 9))
-            
-            # Предупреждение об отрицательных весах
-            if self.has_negative_weights:
-                warning_text = "⚠️ Обнаружены отрицательные веса!"
-                self.canvas.create_text(legend_x, legend_y + 70, text=warning_text, anchor=tk.W, font=('Arial', 9, 'bold'), fill="red")
-                legend_y += 20
-            
-            if self.algorithm_finished and self.algorithm_result:
-                if "Найден путь" in self.algorithm_result:
-                    result_line = self.algorithm_result.split("(")[0]
-                    self.canvas.create_text(legend_x, legend_y + 70, text=f"✅ {result_line}", anchor=tk.W, font=('Arial', 9, 'bold'))
-                else:
-                    self.canvas.create_text(legend_x, legend_y + 70, text=f"❌ {self.algorithm_result}", anchor=tk.W, font=('Arial', 9, 'bold'))
-            else:
-                state_info = "⏸️ ПАУЗА" if self.pause else "▶️ ВЫПОЛНЕНИЕ"
-                self.canvas.create_text(legend_x, legend_y + 70, text=f"Состояние: {state_info}", anchor=tk.W, font=('Arial', 10, 'bold'))
-        
-        # Информация о масштабе внизу холста
-        scale_y = 580
-        scale_text = f"Масштаб: {self.zoom_level:.1%}"
-        self.canvas.create_text(legend_x, scale_y, text=scale_text, anchor=tk.W, font=('Arial', 10, 'bold'), fill="darkblue")
-        
-        if self.pan_offset_x != 0 or self.pan_offset_y != 0:
-            pan_text = f"Смещение: ({self.pan_offset_x:.0f}, {self.pan_offset_y:.0f})"
-            self.canvas.create_text(legend_x + 120, scale_y, text=pan_text, anchor=tk.W, font=('Arial', 10), fill="darkblue")
-    
-    def step_forward(self):
-        if not self.algorithm_finished:
-            if self.algorithm_step():
-                self.draw_graph()
-            else:
-                self.draw_graph()
-    
-    def step_backward(self):
-        if self.current_history_index > 0:
-            if self.load_state(self.current_history_index - 1):
-                self.draw_graph()
-    
+        self.save_state(f"Завершено: {self.algorithm_result}")
+        self.status_label.setText(self.algorithm_result)
+        self.update_progress()  # Обновляем прогресс при завершении
+
     def toggle_pause(self):
         self.pause = not self.pause
-        
-        if self.pause:
-            if self.auto_animation_id:
-                self.root.after_cancel(self.auto_animation_id)
-                self.auto_animation_id = None
-            self.pause_btn.config(text="▶️ Продолжить")
-            if self.algorithm_finished and self.algorithm_result:
-                self.status_var.set(f"✅ {self.algorithm_result}")
-            else:
-                self.status_var.set("⏸️ Пауза - используйте кнопки для пошагового выполнения")
+        # Исправленная логика переключения иконки паузы
+        if not self.pause:
+            self.pause_btn.setText("❚❚")
+            self.pause_btn.setToolTip("Пауза")
         else:
-            self.pause_btn.config(text="⏸️ Пауза")
-            self.status_var.set("▶️ Выполнение алгоритма...")
-            self.auto_animate()
-    
-    def restart(self):
-        if self.auto_animation_id:
-            self.root.after_cancel(self.auto_animation_id)
-            self.auto_animation_id = None
+            self.pause_btn.setText("▶")
+            self.pause_btn.setToolTip("Старт")
         
-        self.initialize_algorithm()
+        if not self.pause:
+            self.animation_timer = QTimer()
+            self.animation_timer.timeout.connect(self.auto_step)
+            self.animation_timer.start(self.animation_speed)
+
+    def auto_step(self):
+        if self.pause or self.algorithm_finished:
+            if hasattr(self, 'animation_timer'):
+                self.animation_timer.stop()
+            return
+        
+        self.step_forward()
+
+    def restart(self):
+        if hasattr(self, 'animation_timer'):
+            self.animation_timer.stop()
+        
         self.pause = True
-        self.pause_btn.config(text="▶️ Продолжить")
-        self.status_var.set("🔄 Алгоритм перезапущен. Нажмите 'Продолжить' для старта")
-        self.draw_graph()
-    
-    def auto_animate(self):
-        if not self.pause and not self.algorithm_finished:
-            self.step_forward()
-            self.auto_animation_id = self.root.after(self.current_speed_delay, self.auto_animate)
-        elif not self.pause and self.algorithm_finished:
-            self.pause = True
-            self.pause_btn.config(text="▶️ Продолжить")
-            if self.algorithm_result:
-                self.status_var.set(f"✅ {self.algorithm_result}")
+        self.pause_btn.setText("▶")
+        self.pause_btn.setToolTip("Старт")
+        self.initialize_algorithm()
+        self.update_progress()
+        self.update_results_table()
+        self.canvas_widget.update()
+        self.status_label.setText("Алгоритм перезапущен. Нажмите 'Старт' для начала.")
+
+    def update_progress(self):
+        """Обновление прогресс-бара с исправленной логикой завершения"""
+        if not self.positions:
+            self.progress_bar.setValue(0)
+            return
+        
+        if self.algorithm_finished:
+            # Когда алгоритм завершен, прогресс-бар должен быть полностью заполнен
+            self.progress_bar.setValue(100)
+        elif self.dijkstra_radio.isChecked():
+            total_nodes = len(self.positions)
+            visited_nodes = len(self.visited)
+            progress = int((visited_nodes / total_nodes) * 100)
+            self.progress_bar.setValue(progress)
+        else:
+            # Для Беллмана-Форда прогресс по итерациям
+            total_iterations = len(self.positions)
+            if self.bellman_iteration < total_iterations - 1:
+                progress = int((self.bellman_iteration / (total_iterations - 1)) * 100)
             else:
-                self.status_var.set("✅ Алгоритм завершен!")
-    
-    def run(self):
-        self.draw_graph()
-        self.status_var.set("⏸️ Программа запущена в режиме паузы. Нажмите 'Загрузить граф' или 'Продолжить'")
-        self.root.mainloop()
+                # На этапе проверки отрицательных циклов
+                total_edges = len(self.bellman_edges)
+                if total_edges > 0:
+                    progress = 80 + int((self.bellman_edge_index / total_edges) * 20)
+                else:
+                    progress = 100
+            self.progress_bar.setValue(min(progress, 100))
+
+    def update_results_table(self):
+        self.results_tree.clear()
+        
+        if not hasattr(self, 'distances'):
+            return
+        
+        for node in sorted(self.positions.keys()):
+            distance = self.distances[node]
+            distance_text = f"{distance:.1f}" if distance != float('inf') else "∞"
+            
+            path = []
+            current = node
+            max_steps = len(self.positions)
+            
+            while current != self.start_node and current in self.previous and max_steps > 0:
+                path.append(current)
+                current = self.previous[current]
+                max_steps -= 1
+            
+            if max_steps > 0 and current == self.start_node:
+                path.append(self.start_node)
+                path.reverse()
+                path_text = " -> ".join(path)
+            else:
+                path_text = "-"
+            
+            item = QTreeWidgetItem([node, distance_text, path_text])
+            self.results_tree.addTopLevelItem(item)
+            
+            if node == self.start_node:
+                item.setBackground(0, QColor(self.current_theme['success']))
+            elif node == self.end_node:
+                item.setBackground(0, QColor(self.current_theme['danger']))
+            elif node in self.visited:
+                item.setBackground(0, QColor(self.current_theme['accent']))
+
+def main():
+    app = QApplication(sys.argv)
+    app.setStyle('Fusion')
+    window = ModernGraphVisualizer()
+    window.show()
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
-    app = GraphVisualizerTkinter()
-    print("Tkinter визуализатор алгоритмов запущен!")
-    print("Функции:")
-    print("  - Загрузка графа из файла (формат: A B 5)")
-    print("  - Управление скоростью анимации")
-    print("  - Алгоритмы: Дейкстра и Беллман-Форд")
-    print("  - Автоматическое определение отрицательных весов")
-    print("  - Автопереключение на Беллмана-Форда при отрицательных весах")
-    print("  - Выбор начальной и конечной точек через интерфейс")
-    print("  - Таблица результатов для Беллмана-Форда (расстояния до всех вершин)")
-    print("  - Пошаговое выполнение и перемотка")
-    print("  - Масштабирование колесиком мыши")
-    print("  - Панорамирование средней кнопкой мыши")
-    print("  - Кнопки приближения/отдаления")
-    print("\nПример файла графа:")
-    print("A B 4")
-    print("B C 3")
-    print("START A")
-    print("END C")
-    app.run()
+    main()
