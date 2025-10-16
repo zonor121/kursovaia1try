@@ -59,7 +59,14 @@ class GraphCanvas(QWidget):
             painter.drawLine(0, y, self.width(), y)
     
     def draw_edges(self, painter):
+        # Используем множество для отслеживания уже отрисованных ребер
+        drawn_edges = set()
+        
         for (u, v), weight in self.parent.graph.items():
+            # Пропускаем обратные ребра, чтобы не дублировать отрисовку
+            if (v, u) in drawn_edges:
+                continue
+                
             if u in self.parent.positions and v in self.parent.positions:
                 x1, y1 = self.parent.get_transformed_position(*self.parent.positions[u])
                 x2, y2 = self.parent.get_transformed_position(*self.parent.positions[v])
@@ -87,9 +94,12 @@ class GraphCanvas(QWidget):
                 painter.setPen(pen)
                 painter.drawLine(int(x1), int(y1), int(x2), int(y2))
                 
-                # Рисование веса ребра
+                # Рисование веса ребра (только один раз)
                 if self.parent.zoom_level > 0.3:
                     self.draw_edge_weight(painter, x1, y1, x2, y2, weight)
+                
+                # Помечаем ребро как отрисованное
+                drawn_edges.add((u, v))
     
     def draw_edge_weight(self, painter, x1, y1, x2, y2, weight):
         mid_x = (x1 + x2) / 2
@@ -789,29 +799,26 @@ class ModernGraphVisualizer(QMainWindow):
         self.graph = {}
         for u, v, weight in edges:
             self.graph[(u, v)] = weight
-            self.graph[(v, u)] = weight
+            # Не добавляем обратное ребро - теперь граф неориентированный
         
-        # Сохраняем исходную форму графа, но увеличиваем масштаб
-        center_x, center_y = 600, 400  # Центр смещен для большего пространства
-        scale_factor = 1.8  # Коэффициент увеличения
+        # Возвращаем исходное расположение узлов
+        center_x, center_y = 400, 300  # Оригинальный центр
         
-        # Внутренний шестиугольник - увеличен с сохранением формы
         inner_nodes = ['A', 'B', 'C', 'D', 'E', 'F']
         for i, node in enumerate(inner_nodes):
             angle = 2 * math.pi * i / len(inner_nodes)
-            radius = 200 * scale_factor  # Увеличенный радиус с сохранением формы
-            x = center_x + radius * math.cos(angle)
-            y = center_y + radius * math.sin(angle)
-            self.positions[node] = (x, y)
+            self.positions[node] = (
+                center_x + 200 * math.cos(angle),
+                center_y + 200 * math.sin(angle)
+            )
         
-        # Внешние узлы - увеличены с сохранением формы
         outer_nodes = ['G', 'H', 'I']
         for i, node in enumerate(outer_nodes):
-            angle = 2 * math.pi * i / len(outer_nodes) + math.pi/6
-            radius = 350 * scale_factor  # Увеличенный радиус с сохранением формы
-            x = center_x + radius * math.cos(angle)
-            y = center_y + radius * math.sin(angle)
-            self.positions[node] = (x, y)
+            angle = 2 * math.pi * i / len(outer_nodes) - math.pi/6
+            self.positions[node] = (
+                center_x + 350 * math.cos(angle),
+                center_y + 350 * math.sin(angle)
+            )
         
         self.start_node = 'G'
         self.end_node = 'D'
@@ -823,12 +830,13 @@ class ModernGraphVisualizer(QMainWindow):
     def update_graph_info(self):
         """Обновление информации о графе"""
         nodes_count = len(self.positions)
-        edges_count = len(self.graph) // 2
+        edges_count = len(self.graph)  # Теперь ребра не дублируются
         negative_weights = "Да" if self.has_negative_weights else "Нет"
         
         info_text = f"""Узлов: {nodes_count}
 Ребер: {edges_count}
-Отрицательные веса: {negative_weights}"""
+Отрицательные веса: {negative_weights}
+Тип: Неориентированный"""
         
         self.graph_info_label.setText(info_text)
 
@@ -910,7 +918,7 @@ class ModernGraphVisualizer(QMainWindow):
             self.graph = {}
             for u, v, weight in edges:
                 self.graph[(u, v)] = weight
-                self.graph[(v, u)] = weight
+                # Не добавляем обратное ребро
             
             self.calculate_positions()
             
@@ -944,17 +952,15 @@ class ModernGraphVisualizer(QMainWindow):
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл:\n{str(e)}")
 
     def calculate_positions(self):
-        """Расчет позиций узлов с сохранением исходной формы"""
+        """Расчет позиций узлов"""
         nodes = list(set([node for edge in self.graph.keys() for node in edge]))
         self.positions = {}
         
-        center_x, center_y = 600, 400  # Центр смещен для большего пространства
-        scale_factor = 1.8  # Коэффициент увеличения
+        center_x, center_y = 400, 300  # Оригинальный центр
         
         for i, node in enumerate(nodes):
             angle = 2 * math.pi * i / len(nodes)
-            # Используем круговое расположение с увеличенным радиусом
-            radius = min(400 * scale_factor, 80 * len(nodes) * scale_factor)
+            radius = min(300, 50 * len(nodes))  # Оригинальный радиус
             self.positions[node] = (
                 center_x + radius * math.cos(angle),
                 center_y + radius * math.sin(angle)
@@ -969,15 +975,14 @@ class ModernGraphVisualizer(QMainWindow):
         
         self.graph = {}
         
-        # Создаем базовую связность
+        # Создаем базовую связность (только в одном направлении)
         for i in range(len(selected_nodes) - 1):
             u = selected_nodes[i]
             v = selected_nodes[i + 1]
             weight = random.randint(1, 10)
             self.graph[(u, v)] = weight
-            self.graph[(v, u)] = weight
         
-        # Добавляем случайные ребра
+        # Добавляем случайные ребра (только в одном направлении)
         num_extra_edges = random.randint(num_nodes, num_nodes + 3)
         for _ in range(num_extra_edges):
             u = random.choice(selected_nodes)
@@ -987,7 +992,6 @@ class ModernGraphVisualizer(QMainWindow):
                 if random.random() < 0.1:
                     weight = -random.randint(1, 3)
                 self.graph[(u, v)] = weight
-                self.graph[(v, u)] = weight
         
         self.calculate_positions()
         self.start_node = random.choice(selected_nodes)
@@ -1005,7 +1009,7 @@ class ModernGraphVisualizer(QMainWindow):
         QMessageBox.information(self, "Случайный граф", 
                                f"Сгенерирован случайный граф!\n"
                                f"Узлов: {len(selected_nodes)}\n"
-                               f"Ребер: {len(self.graph)//2}\n"
+                               f"Ребер: {len(self.graph)}\n"  # Теперь не делим на 2
                                f"Старт: {self.start_node}, Конец: {self.end_node}")
 
     # Остальные методы алгоритмов остаются без изменений

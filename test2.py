@@ -59,7 +59,14 @@ class GraphCanvas(QWidget):
             painter.drawLine(0, y, self.width(), y)
     
     def draw_edges(self, painter):
+        # Используем множество для отслеживания уже отрисованных ребер
+        drawn_edges = set()
+        
         for (u, v), weight in self.parent.graph.items():
+            # Пропускаем обратные ребра, чтобы не дублировать отрисовку
+            if (v, u) in drawn_edges:
+                continue
+                
             if u in self.parent.positions and v in self.parent.positions:
                 x1, y1 = self.parent.get_transformed_position(*self.parent.positions[u])
                 x2, y2 = self.parent.get_transformed_position(*self.parent.positions[v])
@@ -87,9 +94,12 @@ class GraphCanvas(QWidget):
                 painter.setPen(pen)
                 painter.drawLine(int(x1), int(y1), int(x2), int(y2))
                 
-                # Рисование веса ребра
+                # Рисование веса ребра (только один раз)
                 if self.parent.zoom_level > 0.3:
                     self.draw_edge_weight(painter, x1, y1, x2, y2, weight)
+                
+                # Помечаем ребро как отрисованное
+                drawn_edges.add((u, v))
     
     def draw_edge_weight(self, painter, x1, y1, x2, y2, weight):
         mid_x = (x1 + x2) / 2
@@ -263,7 +273,7 @@ class ModernGraphVisualizer(QMainWindow):
         self.setWindowTitle("Визуализация алгоритмов кратчайшего пути - Modern UI")
         self.setGeometry(100, 100, 1400, 900)
         
-        # Настройка темной темы по умолчанию
+        # Настройка темной темы
         self.dark_mode = True
         self.setup_themes()
         self.apply_theme()
@@ -297,80 +307,43 @@ class ModernGraphVisualizer(QMainWindow):
         self.initialize_algorithm()
 
     def setup_themes(self):
-        """Настройка улучшенных цветовых тем"""
-        self.themes = {
-            'dark': {
-                'bg': '#1a1a1a',
-                'bg_gradient_start': '#1a1a1a',
-                'bg_gradient_end': '#2a2a2a',
-                'bg_secondary': 'rgba(45, 45, 45, 0.8)',
-                'bg_tertiary': 'rgba(60, 60, 60, 0.6)',
-                'text': '#ffffff',
-                'text_secondary': '#aaaaaa',
-                'accent': '#7B61FF',  # Современный фиолетовый
-                'accent_secondary': '#00D4FF',
-                'danger': '#FF6B6B',
-                'warning': '#FFD93D',
-                'success': '#6BCF7F',
-                'border': 'rgba(255, 255, 255, 0.1)',
-                'canvas_bg': '#121212',
-                'grid_color': '#ffffff',
-                'show_grid': True,
-                'glass_effect': True
-            },
-            'light': {
-                'bg': '#ffffff',
-                'bg_gradient_start': '#f8f9fa',
-                'bg_gradient_end': '#e9ecef',
-                'bg_secondary': 'rgba(255, 255, 255, 0.8)',
-                'bg_tertiary': 'rgba(248, 249, 250, 0.6)',
-                'text': '#212529',
-                'text_secondary': '#6c757d',
-                'accent': '#6f42c1',
-                'accent_secondary': '#0dcaf0',
-                'danger': '#dc3545',
-                'warning': '#ffc107',
-                'success': '#198754',
-                'border': 'rgba(0, 0, 0, 0.1)',
-                'canvas_bg': '#f8f9fa',
-                'grid_color': '#000000',
-                'show_grid': True,
-                'glass_effect': True
-            }
+        """Настройка темной цветовой темы"""
+        self.current_theme = {
+            'bg': '#1a1a1a',
+            'bg_gradient_start': '#1a1a1a',
+            'bg_gradient_end': '#2a2a2a',
+            'bg_secondary': 'rgba(45, 45, 45, 0.8)',
+            'bg_tertiary': 'rgba(60, 60, 60, 0.6)',
+            'text': '#ffffff',
+            'text_secondary': '#aaaaaa',
+            'accent': '#7B61FF',  # Современный фиолетовый
+            'accent_secondary': '#00D4FF',
+            'danger': '#FF6B6B',
+            'warning': '#FFD93D',
+            'success': '#6BCF7F',
+            'border': 'rgba(255, 255, 255, 0.1)',
+            'canvas_bg': '#121212',
+            'grid_color': '#ffffff',
+            'show_grid': True,
+            'glass_effect': True
         }
-        self.current_theme = self.themes['dark']
 
     def apply_theme(self):
-        """Применение текущей темы"""
+        """Применение темной темы"""
         palette = QPalette()
-        if self.dark_mode:
-            palette.setColor(QPalette.Window, QColor(self.current_theme['bg']))
-            palette.setColor(QPalette.WindowText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Base, QColor(self.current_theme['bg_secondary']))
-            palette.setColor(QPalette.AlternateBase, QColor(self.current_theme['bg_tertiary']))
-            palette.setColor(QPalette.ToolTipBase, QColor(self.current_theme['bg']))
-            palette.setColor(QPalette.ToolTipText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Text, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Button, QColor(self.current_theme['bg_secondary']))
-            palette.setColor(QPalette.ButtonText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.BrightText, Qt.red)
-            palette.setColor(QPalette.Link, QColor(self.current_theme['accent']))
-            palette.setColor(QPalette.Highlight, QColor(self.current_theme['accent']))
-            palette.setColor(QPalette.HighlightedText, Qt.black)
-        else:
-            palette.setColor(QPalette.Window, QColor(self.current_theme['bg']))
-            palette.setColor(QPalette.WindowText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Base, QColor(self.current_theme['bg_secondary']))
-            palette.setColor(QPalette.AlternateBase, QColor(self.current_theme['bg_tertiary']))
-            palette.setColor(QPalette.ToolTipBase, QColor(self.current_theme['bg']))
-            palette.setColor(QPalette.ToolTipText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Text, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Button, QColor(self.current_theme['bg_secondary']))
-            palette.setColor(QPalette.ButtonText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.BrightText, Qt.red)
-            palette.setColor(QPalette.Link, QColor(self.current_theme['accent']))
-            palette.setColor(QPalette.Highlight, QColor(self.current_theme['accent']))
-            palette.setColor(QPalette.HighlightedText, Qt.white)
+        palette.setColor(QPalette.Window, QColor(self.current_theme['bg']))
+        palette.setColor(QPalette.WindowText, QColor(self.current_theme['text']))
+        palette.setColor(QPalette.Base, QColor(self.current_theme['bg_secondary']))
+        palette.setColor(QPalette.AlternateBase, QColor(self.current_theme['bg_tertiary']))
+        palette.setColor(QPalette.ToolTipBase, QColor(self.current_theme['bg']))
+        palette.setColor(QPalette.ToolTipText, QColor(self.current_theme['text']))
+        palette.setColor(QPalette.Text, QColor(self.current_theme['text']))
+        palette.setColor(QPalette.Button, QColor(self.current_theme['bg_secondary']))
+        palette.setColor(QPalette.ButtonText, QColor(self.current_theme['text']))
+        palette.setColor(QPalette.BrightText, Qt.red)
+        palette.setColor(QPalette.Link, QColor(self.current_theme['accent']))
+        palette.setColor(QPalette.Highlight, QColor(self.current_theme['accent']))
+        palette.setColor(QPalette.HighlightedText, Qt.black)
         
         QApplication.setPalette(palette)
 
@@ -507,11 +480,9 @@ class ModernGraphVisualizer(QMainWindow):
         
         self.load_btn = self.create_glass_button("📁", "Загрузить граф", self.load_graph_from_file)
         self.random_btn = self.create_glass_button("🎲", "Случайный граф", self.generate_random_graph)
-        self.theme_btn = self.create_glass_button("🌙", "Переключить тему", self.toggle_theme)
         
         file_layout.addWidget(self.load_btn)
         file_layout.addWidget(self.random_btn)
-        file_layout.addWidget(self.theme_btn)
         
         top_layout.addLayout(file_layout)
         
@@ -809,14 +780,6 @@ class ModernGraphVisualizer(QMainWindow):
         transformed_y = center_y + (y - center_y + self.pan_offset_y) * self.zoom_level
         return transformed_x, transformed_y
 
-    def toggle_theme(self):
-        self.dark_mode = not self.dark_mode
-        self.current_theme = self.themes['dark'] if self.dark_mode else self.themes['light']
-        self.apply_theme()
-        self.theme_btn.setText("☀️" if self.dark_mode else "🌙")
-        self.theme_btn.setToolTip("Светлая тема" if self.dark_mode else "Тёмная тема")
-        self.canvas_widget.update()
-
     def change_speed(self, value):
         speeds = ["Очень медленно", "Медленно", "Средняя", "Быстро", "Очень быстро", "Максимум"]
         delays = [2000, 1000, 500, 200, 50, 0]
@@ -836,24 +799,25 @@ class ModernGraphVisualizer(QMainWindow):
         self.graph = {}
         for u, v, weight in edges:
             self.graph[(u, v)] = weight
-            self.graph[(v, u)] = weight
+            # Не добавляем обратное ребро - теперь граф неориентированный
         
-        center_x, center_y = 400, 300
+        # Возвращаем исходный размер графа
+        center_x, center_y = 500, 300
         
         inner_nodes = ['A', 'B', 'C', 'D', 'E', 'F']
         for i, node in enumerate(inner_nodes):
             angle = 2 * math.pi * i / len(inner_nodes)
             self.positions[node] = (
-                center_x + 120 * math.cos(angle),
-                center_y + 120 * math.sin(angle)
+                center_x + 200 * math.cos(angle),
+                center_y + 200 * math.sin(angle)
             )
         
-        middle_nodes = ['G', 'H', 'I']
-        for i, node in enumerate(middle_nodes):
-            angle = 2 * math.pi * i / len(middle_nodes) - math.pi/6
+        outer_nodes = ['G', 'H', 'I']
+        for i, node in enumerate(outer_nodes):
+            angle = 2 * math.pi * i / len(outer_nodes) - math.pi/6
             self.positions[node] = (
-                center_x + 250 * math.cos(angle),
-                center_y + 250 * math.sin(angle)
+                center_x + 350 * math.cos(angle),
+                center_y + 350 * math.sin(angle)
             )
         
         self.start_node = 'G'
@@ -866,12 +830,13 @@ class ModernGraphVisualizer(QMainWindow):
     def update_graph_info(self):
         """Обновление информации о графе"""
         nodes_count = len(self.positions)
-        edges_count = len(self.graph) // 2
+        edges_count = len(self.graph)  # Теперь ребра не дублируются
         negative_weights = "Да" if self.has_negative_weights else "Нет"
         
         info_text = f"""Узлов: {nodes_count}
 Ребер: {edges_count}
-Отрицательные веса: {negative_weights}"""
+Отрицательные веса: {negative_weights}
+Тип: Неориентированный"""
         
         self.graph_info_label.setText(info_text)
 
@@ -953,7 +918,7 @@ class ModernGraphVisualizer(QMainWindow):
             self.graph = {}
             for u, v, weight in edges:
                 self.graph[(u, v)] = weight
-                self.graph[(v, u)] = weight
+                # Не добавляем обратное ребро
             
             self.calculate_positions()
             
@@ -987,14 +952,15 @@ class ModernGraphVisualizer(QMainWindow):
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл:\n{str(e)}")
 
     def calculate_positions(self):
+        """Расчет позиций узлов"""
         nodes = list(set([node for edge in self.graph.keys() for node in edge]))
         self.positions = {}
         
-        center_x, center_y = 400, 300
-        radius = min(300, 40 * len(nodes))
+        center_x, center_y = 500, 300
         
         for i, node in enumerate(nodes):
             angle = 2 * math.pi * i / len(nodes)
+            radius = min(400, 60 * len(nodes))
             self.positions[node] = (
                 center_x + radius * math.cos(angle),
                 center_y + radius * math.sin(angle)
@@ -1009,15 +975,14 @@ class ModernGraphVisualizer(QMainWindow):
         
         self.graph = {}
         
-        # Создаем базовую связность
+        # Создаем базовую связность (только в одном направлении)
         for i in range(len(selected_nodes) - 1):
             u = selected_nodes[i]
             v = selected_nodes[i + 1]
             weight = random.randint(1, 10)
             self.graph[(u, v)] = weight
-            self.graph[(v, u)] = weight
         
-        # Добавляем случайные ребра
+        # Добавляем случайные ребра (только в одном направлении)
         num_extra_edges = random.randint(num_nodes, num_nodes + 3)
         for _ in range(num_extra_edges):
             u = random.choice(selected_nodes)
@@ -1027,7 +992,6 @@ class ModernGraphVisualizer(QMainWindow):
                 if random.random() < 0.1:
                     weight = -random.randint(1, 3)
                 self.graph[(u, v)] = weight
-                self.graph[(v, u)] = weight
         
         self.calculate_positions()
         self.start_node = random.choice(selected_nodes)
@@ -1045,10 +1009,10 @@ class ModernGraphVisualizer(QMainWindow):
         QMessageBox.information(self, "Случайный граф", 
                                f"Сгенерирован случайный граф!\n"
                                f"Узлов: {len(selected_nodes)}\n"
-                               f"Ребер: {len(self.graph)//2}\n"
+                               f"Ребер: {len(self.graph)}\n"  # Теперь не делим на 2
                                f"Старт: {self.start_node}, Конец: {self.end_node}")
 
-    # Добавляем недостающие методы алгоритмов
+    # Остальные методы алгоритмов остаются без изменений
     def initialize_algorithm(self):
         """Инициализация алгоритма"""
         self.distances = {node: float('inf') for node in self.positions}
