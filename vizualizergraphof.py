@@ -36,7 +36,17 @@ class GraphCanvas(QWidget):
         self.draw_legend(painter)
         
     def draw_edges(self, painter):
+        # Используем множество для отслеживания уже нарисованных ребер
+        drawn_edges = set()
+        
         for (u, v), weight in self.parent.graph.items():
+            # Проверяем, не рисовали ли мы уже это ребро (в обратном направлении)
+            edge_key = tuple(sorted([u, v]))
+            if edge_key in drawn_edges:
+                continue
+                
+            drawn_edges.add(edge_key)
+            
             if u in self.parent.positions and v in self.parent.positions:
                 x1, y1 = self.parent.get_transformed_position(*self.parent.positions[u])
                 x2, y2 = self.parent.get_transformed_position(*self.parent.positions[v])
@@ -217,7 +227,7 @@ class ModernGraphVisualizer(QMainWindow):
         self.initialize_algorithm()
 
     def setup_themes(self):
-        """Настройка цветовых тем"""
+        """Настройка цветовых тем - только темная тема"""
         self.themes = {
             'dark': {
                 'bg': '#1e1e1e',
@@ -232,55 +242,26 @@ class ModernGraphVisualizer(QMainWindow):
                 'success': '#4caf50',
                 'border': '#444444',
                 'canvas_bg': '#121212'
-            },
-            'light': {
-                'bg': '#ffffff',
-                'bg_secondary': '#f5f5f5',
-                'bg_tertiary': '#eeeeee',
-                'text': '#212121',
-                'text_secondary': '#757575',
-                'accent': '#6200ee',
-                'accent_secondary': '#018786',
-                'danger': '#b00020',
-                'warning': '#ff9800',
-                'success': '#4caf50',
-                'border': '#e0e0e0',
-                'canvas_bg': '#fafafa'
             }
         }
         self.current_theme = self.themes['dark']
 
     def apply_theme(self):
-        """Применение текущей темы"""
+        """Применение темной темы"""
         palette = QPalette()
-        if self.dark_mode:
-            palette.setColor(QPalette.Window, QColor(self.current_theme['bg']))
-            palette.setColor(QPalette.WindowText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Base, QColor(self.current_theme['bg_secondary']))
-            palette.setColor(QPalette.AlternateBase, QColor(self.current_theme['bg_tertiary']))
-            palette.setColor(QPalette.ToolTipBase, QColor(self.current_theme['bg']))
-            palette.setColor(QPalette.ToolTipText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Text, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Button, QColor(self.current_theme['bg_secondary']))
-            palette.setColor(QPalette.ButtonText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.BrightText, Qt.red)
-            palette.setColor(QPalette.Link, QColor(self.current_theme['accent']))
-            palette.setColor(QPalette.Highlight, QColor(self.current_theme['accent']))
-            palette.setColor(QPalette.HighlightedText, Qt.black)
-        else:
-            palette.setColor(QPalette.Window, QColor(self.current_theme['bg']))
-            palette.setColor(QPalette.WindowText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Base, QColor(self.current_theme['bg_secondary']))
-            palette.setColor(QPalette.AlternateBase, QColor(self.current_theme['bg_tertiary']))
-            palette.setColor(QPalette.ToolTipBase, QColor(self.current_theme['bg']))
-            palette.setColor(QPalette.ToolTipText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Text, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.Button, QColor(self.current_theme['bg_secondary']))
-            palette.setColor(QPalette.ButtonText, QColor(self.current_theme['text']))
-            palette.setColor(QPalette.BrightText, Qt.red)
-            palette.setColor(QPalette.Link, QColor(self.current_theme['accent']))
-            palette.setColor(QPalette.Highlight, QColor(self.current_theme['accent']))
-            palette.setColor(QPalette.HighlightedText, Qt.white)
+        palette.setColor(QPalette.Window, QColor(self.current_theme['bg']))
+        palette.setColor(QPalette.WindowText, QColor(self.current_theme['text']))
+        palette.setColor(QPalette.Base, QColor(self.current_theme['bg_secondary']))
+        palette.setColor(QPalette.AlternateBase, QColor(self.current_theme['bg_tertiary']))
+        palette.setColor(QPalette.ToolTipBase, QColor(self.current_theme['bg']))
+        palette.setColor(QPalette.ToolTipText, QColor(self.current_theme['text']))
+        palette.setColor(QPalette.Text, QColor(self.current_theme['text']))
+        palette.setColor(QPalette.Button, QColor(self.current_theme['bg_secondary']))
+        palette.setColor(QPalette.ButtonText, QColor(self.current_theme['text']))
+        palette.setColor(QPalette.BrightText, Qt.red)
+        palette.setColor(QPalette.Link, QColor(self.current_theme['accent']))
+        palette.setColor(QPalette.Highlight, QColor(self.current_theme['accent']))
+        palette.setColor(QPalette.HighlightedText, Qt.black)
         
         QApplication.setPalette(palette)
 
@@ -421,11 +402,9 @@ class ModernGraphVisualizer(QMainWindow):
         
         self.load_btn = self.create_styled_button("📁 Загрузить", self.load_graph_from_file)
         self.random_btn = self.create_styled_button("🎲 Случайный", self.generate_random_graph)
-        self.theme_btn = self.create_styled_button("🌙 Тема", self.toggle_theme)
         
         file_layout.addWidget(self.load_btn)
         file_layout.addWidget(self.random_btn)
-        file_layout.addWidget(self.theme_btn)
         
         top_layout.addLayout(file_layout)
         
@@ -732,13 +711,6 @@ class ModernGraphVisualizer(QMainWindow):
         transformed_y = center_y + (y - center_y + self.pan_offset_y) * self.zoom_level
         return transformed_x, transformed_y
 
-    def toggle_theme(self):
-        self.dark_mode = not self.dark_mode
-        self.current_theme = self.themes['dark'] if self.dark_mode else self.themes['light']
-        self.apply_theme()
-        self.theme_btn.setText("☀️ Светлая" if self.dark_mode else "🌙 Тёмная")
-        self.canvas_widget.update()
-
     def change_speed(self, value):
         speeds = ["Очень медленно", "Медленно", "Средняя", "Быстро", "Очень быстро", "Максимум"]
         delays = [2000, 1000, 500, 200, 50, 0]
@@ -830,7 +802,6 @@ class ModernGraphVisualizer(QMainWindow):
         self.has_negative_weights = any(weight < 0 for weight in self.graph.values())
         return self.has_negative_weights
 
-    # Остальные методы остаются без изменений...
     def load_graph_from_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Выберите файл с графом", "", 
@@ -991,9 +962,10 @@ class ModernGraphVisualizer(QMainWindow):
         self.bellman_changed = False
         self.bellman_edges = self.get_edges_list()  # Получаем список всех ребер
         
-        # Для Дейкстры
+        # Для Дейкстры - создаем очередь с приоритетом
         if self.dijkstra_radio.isChecked():
-            self.queue = [(0, self.start_node)]
+            self.queue = []
+            heapq.heappush(self.queue, (0, self.start_node))
         
         self.history = []
         self.current_history_index = -1
@@ -1061,21 +1033,23 @@ class ModernGraphVisualizer(QMainWindow):
         self.bellman_changed = state.get('bellman_changed', False)
 
     def dijkstra_step(self):
-        """Алгоритм Дейкстры"""
+        """Правильная реализация алгоритма Дейкстры"""
         if not self.queue:
             self.finalize_algorithm()
             return
         
+        # Извлечение вершины с наименьшим расстоянием
         current_distance, self.current_node = heapq.heappop(self.queue)
         
+        # Пропускаем, если уже обработали эту вершину
         if self.current_node in self.visited:
             return
         
+        # Помечаем вершину как посещенную
         self.visited.add(self.current_node)
         self.save_state(f"Обрабатываем узел {self.current_node} (расстояние: {current_distance})")
         
         # Обновляем расстояния до соседей
-        updated = False
         for (u, v), weight in self.graph.items():
             if u == self.current_node and v not in self.visited:
                 new_distance = current_distance + weight
@@ -1084,9 +1058,9 @@ class ModernGraphVisualizer(QMainWindow):
                     self.distances[v] = new_distance
                     self.previous[v] = u
                     heapq.heappush(self.queue, (new_distance, v))
-                    updated = True
                     self.save_state(f"Обновлено расстояние до {v}: {old_dist} -> {new_distance}")
         
+        # Проверяем, достигли ли конечного узла
         if self.current_node == self.end_node:
             self.finalize_algorithm()
 
@@ -1097,10 +1071,6 @@ class ModernGraphVisualizer(QMainWindow):
             if self.bellman_edge_index < len(self.bellman_edges):
                 u, v, weight = self.bellman_edges[self.bellman_edge_index]
                 self.current_node = u
-                
-                # Анимация текущего ребра
-                if self.animation_speed >= 200:
-                    self.animate_edge(u, v, weight)
                 
                 # Релаксация ребра
                 if self.distances[u] != float('inf') and self.distances[u] + weight < self.distances[v]:
@@ -1160,13 +1130,6 @@ class ModernGraphVisualizer(QMainWindow):
             self.algorithm_finished = True
             self.finalize_algorithm()
             return False
-
-    def animate_edge(self, u, v, weight):
-        """Анимация прохода по ребру"""
-        # В PySide6 анимация реализуется через QPropertyAnimation
-        # Здесь можно добавить визуальное выделение ребра
-        self.current_node = u
-        self.canvas_widget.update()
 
     def finalize_algorithm(self):
         """Завершение алгоритма и построение пути"""
