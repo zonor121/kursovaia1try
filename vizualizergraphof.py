@@ -732,33 +732,35 @@ class ModernGraphVisualizer(QMainWindow):
         self.results_tree = QTreeWidget()
         self.results_tree.setHeaderLabels(["Вершина", "Расстояние", "Путь"])
         self.results_tree.setStyleSheet(f"""
-            QTreeWidget {{
-                background: {self.current_theme['bg_secondary']};
-                color: {self.current_theme['text']};
-                border: 1px solid {self.current_theme['border']};
-                border-radius: 4px;
-                font-size: 9px;
-            }}
-            QTreeWidget::item {{
-                padding: 3px;
-                border-bottom: 1px solid {self.current_theme['border']};
-            }}
-            QTreeWidget::item:selected {{
-                background: {self.current_theme['accent']};
-                color: black;
-            }}
-            QHeaderView::section {{
-                background: {self.current_theme['bg_tertiary']};
-                color: {self.current_theme['text']};
-                padding: 4px;
-                border: 1px solid {self.current_theme['border']};
-                font-weight: bold;
-                font-size: 9px;
-            }}
-        """)
-        self.results_tree.setColumnWidth(0, 60)
-        self.results_tree.setColumnWidth(1, 70)
-        self.results_tree.setColumnWidth(2, 150)
+    QTreeWidget {{
+        background: {self.current_theme['bg_secondary']};
+        color: {self.current_theme['text']};
+        border: 1px solid {self.current_theme['border']};
+        border-radius: 4px;
+        font-size: 14px;  /* Увеличено с 9px */
+        font-weight: normal;
+    }}
+    QTreeWidget::item {{
+        padding: 8px;  /* Увеличено с 3px */
+        border-bottom: 1px solid {self.current_theme['border']};
+        height: 22px;  /* Добавлено для увеличения высоты строк */
+    }}
+    QTreeWidget::item:selected {{
+        background: {self.current_theme['accent']};
+        color: black;
+    }}
+    QHeaderView::section {{
+        background: {self.current_theme['bg_tertiary']};
+        color: {self.current_theme['text']};
+        padding: 8px;  /* Увеличено с 4px */
+        border: 1px solid {self.current_theme['border']};
+        font-weight: bold;
+        font-size: 14px;  /* Увеличено с 9px */
+    }}
+""")
+        self.results_tree.setColumnWidth(0, 90)   # Увеличено с 60
+        self.results_tree.setColumnWidth(1, 105)  # Увеличено с 70  
+        self.results_tree.setColumnWidth(2, 225)  # Увеличено с 150
         results_layout.addWidget(self.results_tree)
         
         right_layout.addWidget(results_group)
@@ -771,32 +773,34 @@ class ModernGraphVisualizer(QMainWindow):
         self.weights_tree = QTreeWidget()
         self.weights_tree.setHeaderLabels(["Ребро", "Вес"])
         self.weights_tree.setStyleSheet(f"""
-            QTreeWidget {{
-                background: {self.current_theme['bg_secondary']};
-                color: {self.current_theme['text']};
-                border: 1px solid {self.current_theme['border']};
-                border-radius: 4px;
-                font-size: 9px;
-            }}
-            QTreeWidget::item {{
-                padding: 3px;
-                border-bottom: 1px solid {self.current_theme['border']};
-            }}
-            QTreeWidget::item:selected {{
-                background: {self.current_theme['accent']};
-                color: black;
-            }}
-            QHeaderView::section {{
-                background: {self.current_theme['bg_tertiary']};
-                color: {self.current_theme['text']};
-                padding: 4px;
-                border: 1px solid {self.current_theme['border']};
-                font-weight: bold;
-                font-size: 9px;
-            }}
-        """)
-        self.weights_tree.setColumnWidth(0, 80)
-        self.weights_tree.setColumnWidth(1, 60)
+    QTreeWidget {{
+        background: {self.current_theme['bg_secondary']};
+        color: {self.current_theme['text']};
+        border: 1px solid {self.current_theme['border']};
+        border-radius: 4px;
+        font-size: 14px;  /* Увеличено с 9px */
+        font-weight: normal;
+    }}
+    QTreeWidget::item {{
+        padding: 8px;  /* Увеличено с 3px */
+        border-bottom: 1px solid {self.current_theme['border']};
+        height: 22px;  /* Добавлено для увеличения высоты строк */
+    }}
+    QTreeWidget::item:selected {{
+        background: {self.current_theme['accent']};
+        color: black;
+    }}
+    QHeaderView::section {{
+        background: {self.current_theme['bg_tertiary']};
+        color: {self.current_theme['text']};
+        padding: 8px;  /* Увеличено с 4px */
+        border: 1px solid {self.current_theme['border']};
+        font-weight: bold;
+        font-size: 14px;  /* Увеличено с 9px */
+    }}
+""")
+        self.weights_tree.setColumnWidth(0, 120)  # Увеличено с 80
+        self.weights_tree.setColumnWidth(1, 90)   # Увеличено с 60
         weights_layout.addWidget(self.weights_tree)
         
         right_layout.addWidget(weights_group)
@@ -859,9 +863,9 @@ class ModernGraphVisualizer(QMainWindow):
                 color: {self.current_theme['text']};
                 border: 1px solid {self.current_theme['border']};
                 border-radius: 3px;
-                padding: 3px;
-                min-width: 50px;
-                font-size: 10px;
+                padding: 6px;
+                min-width: 75px;
+                font-size: 14px;
             }}
             QComboBox::drop-down {{
                 border: none;
@@ -875,7 +879,7 @@ class ModernGraphVisualizer(QMainWindow):
                 background: {self.current_theme['bg_secondary']};
                 color: {self.current_theme['text']};
                 selection-background-color: {self.current_theme['accent']};
-                font-size: 10px;
+                font-size: 16px;
             }}
         """
 
@@ -942,6 +946,10 @@ class ModernGraphVisualizer(QMainWindow):
         delays = [2000, 1000, 500, 200, 50, 0]
         self.animation_speed = delays[value]
         self.speed_label.setText(f"{speeds[value]} ({delays[value]}мс/шаг)")
+    
+    # Обновляем интервал работающего таймера
+        if hasattr(self, 'animation_timer') and self.animation_timer.isActive():
+            self.animation_timer.setInterval(self.animation_speed)
 
     def initialize_default_graph(self):
         edges = [
@@ -1369,6 +1377,7 @@ class ModernGraphVisualizer(QMainWindow):
             self.animation_timer = QTimer()
             self.animation_timer.timeout.connect(self.auto_step)
             self.animation_timer.start(self.animation_speed)
+        
 
     def auto_step(self):
         if self.pause or self.algorithm_finished:
