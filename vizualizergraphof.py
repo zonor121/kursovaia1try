@@ -13,6 +13,327 @@ from PySide6.QtCore import Qt, QTimer, QRect
 from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QFont, QPalette, QLinearGradient, QRadialGradient
 
 
+# ==================== БАЗОВЫЙ КЛАСС АЛГОРИТМА ====================
+class ShortestPathAlgorithm:
+    """Базовый класс для алгоритмов поиска кратчайшего пути"""
+    
+    def __init__(self, name, description, supports_negative_weights=False):
+        self.name = name
+        self.description = description
+        self.supports_negative_weights = supports_negative_weights
+        
+    def get_name(self):
+        return self.name
+        
+    def get_description(self):
+        return self.description
+        
+    def initialize(self, graph, start_node, positions, end_node=None):
+        """Инициализация алгоритма"""
+        raise NotImplementedError
+        
+    def execute_step(self):
+        """Выполняет один шаг алгоритма"""
+        raise NotImplementedError
+        
+    def is_finished(self):
+        """Проверяет завершение алгоритма"""
+        raise NotImplementedError
+        
+    def get_result(self):
+        """Возвращает результат выполнения"""
+        raise NotImplementedError
+        
+    def get_current_state(self):
+        """Возвращает текущее состояние для визуализации"""
+        raise NotImplementedError
+
+
+# ==================== ПЛАГИН ДЕЙКСТРЫ ====================
+class DijkstraPlugin(ShortestPathAlgorithm):
+    def __init__(self):
+        super().__init__(
+            name="Дейкстра",
+            description="Алгоритм Дейкстры для поиска кратчайшего пути",
+            supports_negative_weights=False
+        )
+        self.reset()
+        
+    def reset(self):
+        self.distances = {}
+        self.visited = set()
+        self.previous = {}
+        self.queue = []
+        self.current_node = None
+        self.final_path = None
+        self.algorithm_finished = False
+        self.algorithm_result = ""
+        self.graph = None
+        self.start_node = None
+        self.end_node = None
+        
+    def initialize(self, graph, start_node, positions, end_node=None):
+        self.reset()
+        self.graph = graph
+        self.start_node = start_node
+        self.end_node = end_node
+        
+        # Инициализация расстояний
+        self.distances = {node: float('inf') for node in positions}
+        self.distances[start_node] = 0
+        heapq.heappush(self.queue, (0, start_node))
+        
+        return self.get_current_state("Инициализация: расстояния установлены в бесконечность, кроме стартовой вершины")
+        
+    def execute_step(self):
+        if self.algorithm_finished or not self.queue:
+            return None
+            
+        # Извлекаем узел с минимальным расстоянием
+        current_distance, self.current_node = heapq.heappop(self.queue)
+        
+        if self.current_node in self.visited:
+            return self.get_current_state()
+            
+        self.visited.add(self.current_node)
+        
+        # Обрабатываем соседей
+        updates = []
+        for (u, v), weight in self.graph.items():
+            if u == self.current_node and v not in self.visited:
+                new_distance = current_distance + weight
+                if new_distance < self.distances[v]:
+                    old_distance = self.distances[v]
+                    self.distances[v] = new_distance
+                    self.previous[v] = self.current_node
+                    heapq.heappush(self.queue, (new_distance, v))
+                    updates.append((v, old_distance, new_distance))
+        
+        # Проверяем завершение
+        if self.current_node == self.end_node or not self.queue:
+            self.finalize_algorithm()
+            
+        description = f"Обрабатываем узел {self.current_node}"
+        if updates:
+            desc_updates = [f"{v}: {old:.1f}→{new:.1f}" for v, old, new in updates]
+            description += f" | Обновления: {', '.join(desc_updates)}"
+            
+        return self.get_current_state(description)
+        
+    def finalize_algorithm(self):
+        self.algorithm_finished = True
+        self.current_node = None
+        
+        if self.end_node in self.previous and self.distances[self.end_node] != float('inf'):
+            path = self.reconstruct_path(self.end_node)
+            total_distance = self.distances[self.end_node]
+            self.algorithm_result = f"Найден путь: {' -> '.join(path)} (длина: {total_distance})"
+            self.final_path = path
+        else:
+            self.algorithm_result = f"Путь от {self.start_node} до {self.end_node} не найден"
+            self.final_path = None
+            
+    def reconstruct_path(self, end_node):
+        path = []
+        current = end_node
+        while current in self.previous:
+            path.append(current)
+            current = self.previous[current]
+        path.append(self.start_node)
+        return path[::-1]
+        
+    def is_finished(self):
+        return self.algorithm_finished
+        
+    def get_result(self):
+        return {
+            'success': self.final_path is not None,
+            'path': self.final_path,
+            'distance': self.distances.get(self.end_node, float('inf')),
+            'message': self.algorithm_result
+        }
+        
+    def get_current_state(self, description=""):
+        return {
+            'description': description,
+            'distances': self.distances.copy(),
+            'visited': self.visited.copy(),
+            'previous': self.previous.copy(),
+            'current_node': self.current_node,
+            'final_path': self.final_path.copy() if self.final_path else None,
+            'algorithm_finished': self.algorithm_finished,
+            'algorithm_result': self.algorithm_result
+        }
+
+
+# ==================== ПЛАГИН БЕЛЛМАНА-ФОРДА ====================
+class BellmanFordPlugin(ShortestPathAlgorithm):
+    def __init__(self):
+        super().__init__(
+            name="Беллман-Форд", 
+            description="Алгоритм Беллмана-Форда для графов с отрицательными весами",
+            supports_negative_weights=True
+        )
+        self.reset()
+        
+    def reset(self):
+        self.distances = {}
+        self.previous = {}
+        self.current_node = None
+        self.final_path = None
+        self.algorithm_finished = False
+        self.algorithm_result = ""
+        self.iteration = 0
+        self.edge_index = 0
+        self.changed = False
+        self.edges = []
+        self.graph = None
+        self.start_node = None
+        self.end_node = None
+        
+    def initialize(self, graph, start_node, positions, end_node=None):
+        self.reset()
+        self.graph = graph
+        self.start_node = start_node
+        self.end_node = end_node
+        
+        # Инициализация расстояний
+        self.distances = {node: float('inf') for node in positions}
+        self.distances[start_node] = 0
+        
+        # Создаем список ребер
+        self.edges = []
+        for (u, v), weight in graph.items():
+            self.edges.append((u, v, weight))
+        
+        return self.get_current_state(f"Инициализация: |V| = {len(positions)}, |E| = {len(self.edges)}")
+        
+    def execute_step(self):
+        if self.algorithm_finished:
+            return None
+            
+        description = ""
+        
+        # Основные итерации
+        if self.iteration < len(self.distances) - 1:
+            if self.edge_index < len(self.edges):
+                u, v, weight = self.edges[self.edge_index]
+                self.current_node = u
+                
+                if self.distances[u] != float('inf') and self.distances[u] + weight < self.distances[v]:
+                    old_dist = self.distances[v]
+                    self.distances[v] = self.distances[u] + weight
+                    self.previous[v] = u
+                    self.changed = True
+                    
+                    description = f"Итерация {self.iteration + 1}: {u}→{v} ({weight}) - {old_dist:.1f}→{self.distances[v]:.1f}"
+                else:
+                    description = f"Итерация {self.iteration + 1}: {u}→{v} ({weight}) - без изменений"
+                    
+                self.edge_index += 1
+                
+            else:
+                if self.changed:
+                    self.iteration += 1
+                    self.edge_index = 0
+                    self.changed = False
+                    self.current_node = None
+                    description = f"Начало итерации {self.iteration + 1}"
+                else:
+                    # Переходим к проверке отрицательных циклов
+                    self.iteration = len(self.distances) - 1
+                    description = "Переход к проверке отрицательных циклов"
+                    
+        # Проверка отрицательных циклов
+        else:
+            if self.edge_index < len(self.edges):
+                u, v, weight = self.edges[self.edge_index]
+                self.current_node = u
+                
+                if self.distances[u] != float('inf') and self.distances[u] + weight < self.distances[v]:
+                    self.algorithm_finished = True
+                    self.algorithm_result = f"Обнаружен цикл отрицательного веса! {u}→{v} ({weight})"
+                    description = f"ОШИБКА: {self.algorithm_result}"
+                else:
+                    description = f"Проверка циклов: {u}→{v} ({weight})"
+                    
+                self.edge_index += 1
+            else:
+                self.algorithm_finished = True
+                self.finalize_algorithm()
+                description = "Алгоритм завершен"
+                
+        return self.get_current_state(description)
+        
+    def finalize_algorithm(self):
+        if not self.algorithm_result:  # Если не было ошибки с циклом
+            if self.end_node in self.previous and self.distances[self.end_node] != float('inf'):
+                path = self.reconstruct_path(self.end_node)
+                total_distance = self.distances[self.end_node]
+                self.algorithm_result = f"Найден путь: {' -> '.join(path)} (длина: {total_distance})"
+                self.final_path = path
+            else:
+                self.algorithm_result = f"Путь от {self.start_node} до {self.end_node} не найден"
+                self.final_path = None
+                
+    def reconstruct_path(self, end_node):
+        path = []
+        current = end_node
+        while current in self.previous:
+            path.append(current)
+            current = self.previous[current]
+        path.append(self.start_node)
+        return path[::-1]
+        
+    def is_finished(self):
+        return self.algorithm_finished
+        
+    def get_result(self):
+        return {
+            'success': self.final_path is not None and "ОШИБКА" not in self.algorithm_result,
+            'path': self.final_path,
+            'distance': self.distances.get(self.end_node, float('inf')),
+            'message': self.algorithm_result
+        }
+        
+    def get_current_state(self, description=""):
+        return {
+            'description': description,
+            'distances': self.distances.copy(),
+            'previous': self.previous.copy(),
+            'current_node': self.current_node,
+            'final_path': self.final_path.copy() if self.final_path else None,
+            'algorithm_finished': self.algorithm_finished,
+            'algorithm_result': self.algorithm_result,
+            'iteration': self.iteration,
+            'edge_index': self.edge_index
+        }
+
+
+# ==================== МЕНЕДЖЕР ПЛАГИНОВ ====================
+class AlgorithmPluginManager:
+    def __init__(self):
+        self.plugins = {}
+        self.current_plugin = None
+        self.register_plugins()
+        
+    def register_plugins(self):
+        """Регистрируем оба алгоритма"""
+        self.plugins['dijkstra'] = DijkstraPlugin()
+        self.plugins['bellman'] = BellmanFordPlugin()
+        
+    def get_plugin(self, name):
+        return self.plugins.get(name)
+        
+    def get_available_plugins(self):
+        return list(self.plugins.values())
+        
+    def set_current_plugin(self, plugin_name):
+        self.current_plugin = self.get_plugin(plugin_name)
+        return self.current_plugin
+
+
+# ==================== ВИЗУАЛЬНЫЕ КОМПОНЕНТЫ ====================
 class GradientLabel(QLabel):
     def __init__(self, text, parent=None):
         super().__init__(text, parent)
@@ -158,8 +479,6 @@ class GraphCanvas(QWidget):
                 
                 painter.setPen(pen)
                 painter.drawLine(int(x1), int(y1), int(x2), int(y2))
-                
-                # Веса больше не отображаем на холсте - только в таблице
     
     def draw_nodes(self, painter):
         for node, (orig_x, orig_y) in self.parent.positions.items():
@@ -271,11 +590,10 @@ class GraphCanvas(QWidget):
             painter.drawRoundedRect(inner_info_rect, 8, 8)
             
             info_y = legend_y + 30
-            algo_name = "Дейкстра" if self.parent.dijkstra_radio.isChecked() else "Беллман-Форд"
             
             painter.setFont(QFont("Arial", 11, QFont.Bold))
             painter.setPen(QColor(self.parent.current_theme['text']))
-            painter.drawText(25, info_y, f"Алгоритм: {algo_name}")
+            painter.drawText(25, info_y, f"Алгоритм: {self.parent.current_algorithm.get_name() if self.parent.current_algorithm else 'Не выбран'}")
             painter.drawText(25, info_y + 25, f"Старт: {self.parent.start_node}, Конец: {self.parent.end_node}")
             
             if self.parent.algorithm_finished and self.parent.algorithm_result:
@@ -317,6 +635,7 @@ class GraphCanvas(QWidget):
         self.update()
 
 
+# ==================== ГЛАВНОЕ ОКНО ====================
 class ModernGraphVisualizer(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -327,25 +646,37 @@ class ModernGraphVisualizer(QMainWindow):
         self.setup_themes()
         self.apply_theme()
         
+        # Данные графа
         self.graph = {}
         self.positions = {}
         self.original_positions = {}
+        self.start_node = None
+        self.end_node = None
+        
+        # Состояние алгоритма (теперь управляется через плагины)
+        self.distances = {}
+        self.visited = set()
+        self.previous = {}
+        self.current_node = None
+        self.final_path = None
+        self.algorithm_finished = False
+        self.algorithm_result = ""
+        
+        # История и управление
         self.history = []
         self.current_history_index = -1
         self.pause = True
-        self.algorithm_finished = False
-        self.algorithm_result = ""
-        self.has_negative_weights = False
         
+        # Визуальные настройки
         self.animation_speed = 500
         self.zoom_level = 1.0
         self.pan_offset_x = 0
         self.pan_offset_y = 0
         self.is_panning = False
         
-        self.bellman_iteration = 0
-        self.bellman_edge_index = 0
-        self.bellman_changed = False
+        # Менеджер плагинов
+        self.algorithm_manager = AlgorithmPluginManager()
+        self.current_algorithm = None
         
         self.setup_ui()
         self.initialize_default_graph()
@@ -430,7 +761,7 @@ class ModernGraphVisualizer(QMainWindow):
         main_splitter = QSplitter(Qt.Vertical)
         layout.addWidget(main_splitter)
 
-        # Верхняя панель управления (теперь сворачиваемая)
+        # Верхняя панель управления
         self.top_panel = self.create_top_panel()
         main_splitter.addWidget(self.top_panel)
 
@@ -458,13 +789,12 @@ class ModernGraphVisualizer(QMainWindow):
         
         # Настройка пропорций основного сплиттера
         main_splitter.setSizes([120, 780])
-        main_splitter.setChildrenCollapsible(False)  # Не позволяем полностью свернуть панели
+        main_splitter.setChildrenCollapsible(False)
 
         # Нижняя панель статуса
         self.create_status_bar()
 
     def create_top_panel(self):
-        """Создание верхней панели управления (теперь сворачиваемой)"""
         top_frame = QFrame()
         top_frame.setMinimumHeight(80)
         top_frame.setMaximumHeight(200)
@@ -647,7 +977,6 @@ class ModernGraphVisualizer(QMainWindow):
         return btn
 
     def create_right_panel(self):
-        """Создание правой панели управления с таблицей весов"""
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setSpacing(10)
@@ -737,13 +1066,13 @@ class ModernGraphVisualizer(QMainWindow):
         color: {self.current_theme['text']};
         border: 1px solid {self.current_theme['border']};
         border-radius: 4px;
-        font-size: 14px;  /* Увеличено с 9px */
+        font-size: 14px;
         font-weight: normal;
     }}
     QTreeWidget::item {{
-        padding: 8px;  /* Увеличено с 3px */
+        padding: 8px;
         border-bottom: 1px solid {self.current_theme['border']};
-        height: 22px;  /* Добавлено для увеличения высоты строк */
+        height: 22px;
     }}
     QTreeWidget::item:selected {{
         background: {self.current_theme['accent']};
@@ -752,20 +1081,20 @@ class ModernGraphVisualizer(QMainWindow):
     QHeaderView::section {{
         background: {self.current_theme['bg_tertiary']};
         color: {self.current_theme['text']};
-        padding: 8px;  /* Увеличено с 4px */
+        padding: 8px;
         border: 1px solid {self.current_theme['border']};
         font-weight: bold;
-        font-size: 14px;  /* Увеличено с 9px */
+        font-size: 14px;
     }}
 """)
-        self.results_tree.setColumnWidth(0, 90)   # Увеличено с 60
-        self.results_tree.setColumnWidth(1, 105)  # Увеличено с 70  
-        self.results_tree.setColumnWidth(2, 225)  # Увеличено с 150
+        self.results_tree.setColumnWidth(0, 90)
+        self.results_tree.setColumnWidth(1, 105)
+        self.results_tree.setColumnWidth(2, 225)
         results_layout.addWidget(self.results_tree)
         
         right_layout.addWidget(results_group)
         
-        # Таблица весов рёбер (заменяет информацию о графе)
+        # Таблица весов рёбер
         weights_group = QGroupBox("Веса рёбер")
         weights_group.setStyleSheet(self.get_groupbox_style())
         weights_layout = QVBoxLayout(weights_group)
@@ -778,13 +1107,13 @@ class ModernGraphVisualizer(QMainWindow):
         color: {self.current_theme['text']};
         border: 1px solid {self.current_theme['border']};
         border-radius: 4px;
-        font-size: 14px;  /* Увеличено с 9px */
+        font-size: 14px;
         font-weight: normal;
     }}
     QTreeWidget::item {{
-        padding: 8px;  /* Увеличено с 3px */
+        padding: 8px;
         border-bottom: 1px solid {self.current_theme['border']};
-        height: 22px;  /* Добавлено для увеличения высоты строк */
+        height: 22px;
     }}
     QTreeWidget::item:selected {{
         background: {self.current_theme['accent']};
@@ -793,14 +1122,14 @@ class ModernGraphVisualizer(QMainWindow):
     QHeaderView::section {{
         background: {self.current_theme['bg_tertiary']};
         color: {self.current_theme['text']};
-        padding: 8px;  /* Увеличено с 4px */
+        padding: 8px;
         border: 1px solid {self.current_theme['border']};
         font-weight: bold;
-        font-size: 14px;  /* Увеличено с 9px */
+        font-size: 14px;
     }}
 """)
-        self.weights_tree.setColumnWidth(0, 120)  # Увеличено с 80
-        self.weights_tree.setColumnWidth(1, 90)   # Увеличено с 60
+        self.weights_tree.setColumnWidth(0, 120)
+        self.weights_tree.setColumnWidth(1, 90)
         weights_layout.addWidget(self.weights_tree)
         
         right_layout.addWidget(weights_group)
@@ -810,13 +1139,11 @@ class ModernGraphVisualizer(QMainWindow):
         return right_widget
 
     def update_weights_table(self):
-        """Обновляет таблицу весов рёбер"""
         self.weights_tree.clear()
         
         if not self.graph:
             return
         
-        # Используем множество для исключения дубликатов
         drawn_edges = set()
         
         for (u, v), weight in self.graph.items():
@@ -831,7 +1158,6 @@ class ModernGraphVisualizer(QMainWindow):
             
             item = QTreeWidgetItem([edge_text, weight_text])
             
-            # Цветовая индикация для отрицательных весов
             if weight < 0:
                 item.setBackground(1, QColor(self.current_theme['danger']))
                 item.setForeground(1, QColor('white'))
@@ -923,9 +1249,9 @@ class ModernGraphVisualizer(QMainWindow):
         """)
 
     def get_node_color(self, node):
-        if hasattr(self, 'start_node') and node == self.start_node:
+        if node == self.start_node:
             return "#4CAF50"
-        if hasattr(self, 'end_node') and node == self.end_node:
+        if node == self.end_node:
             return "#F44336"
         if node == self.current_node:
             return self.current_theme['warning']
@@ -947,7 +1273,6 @@ class ModernGraphVisualizer(QMainWindow):
         self.animation_speed = delays[value]
         self.speed_label.setText(f"{speeds[value]} ({delays[value]}мс/шаг)")
     
-    # Обновляем интервал работающего таймера
         if hasattr(self, 'animation_timer') and self.animation_timer.isActive():
             self.animation_timer.setInterval(self.animation_speed)
 
@@ -987,9 +1312,8 @@ class ModernGraphVisualizer(QMainWindow):
         self.start_node = 'G'
         self.end_node = 'D'
         self.original_positions = self.positions.copy()
-        self.check_negative_weights()
         self.update_selection_comboboxes()
-        self.update_weights_table()  # Обновляем таблицу весов
+        self.update_weights_table()
 
     def update_selection_comboboxes(self):
         if self.positions:
@@ -999,9 +1323,9 @@ class ModernGraphVisualizer(QMainWindow):
             self.start_combo.addItems(nodes)
             self.end_combo.addItems(nodes)
             
-            if hasattr(self, 'start_node'):
+            if self.start_node:
                 self.start_combo.setCurrentText(self.start_node)
-            if hasattr(self, 'end_node'):
+            if self.end_node:
                 self.end_combo.setCurrentText(self.end_node)
 
     def apply_selection(self):
@@ -1021,8 +1345,7 @@ class ModernGraphVisualizer(QMainWindow):
         self.restart()
 
     def check_negative_weights(self):
-        self.has_negative_weights = any(weight < 0 for weight in self.graph.values())
-        return self.has_negative_weights
+        return any(weight < 0 for weight in self.graph.values())
 
     def load_graph_from_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1091,7 +1414,7 @@ class ModernGraphVisualizer(QMainWindow):
                 self.bellman_radio.setChecked(True)
             
             self.restart()
-            self.update_weights_table()  # Обновляем таблицу весов
+            self.update_weights_table()
             
             message_text = f"Граф загружен!\nРебер: {len(edges)}\nУзлов: {len(self.positions)}\nСтарт: {self.start_node}, Конец: {self.end_node}"
             if has_negative:
@@ -1154,7 +1477,7 @@ class ModernGraphVisualizer(QMainWindow):
             self.bellman_radio.setChecked(True)
         
         self.restart()
-        self.update_weights_table()  # Обновляем таблицу весов
+        self.update_weights_table()
         
         QMessageBox.information(self, "Случайный граф", 
                                f"Сгенерирован случайный граф!\n"
@@ -1162,38 +1485,35 @@ class ModernGraphVisualizer(QMainWindow):
                                f"Ребер: {len(self.graph)//2}\n"
                                f"Старт: {self.start_node}, Конец: {self.end_node}")
 
-    def initialize_algorithm(self):
-        self.distances = {node: float('inf') for node in self.positions}
-        if hasattr(self, 'start_node'):
-            self.distances[self.start_node] = 0
-        
-        self.visited = set()
-        self.previous = {}
-        self.current_node = None
-        self.final_path = None
-        self.algorithm_finished = False
-        self.algorithm_result = ""
-        
-        self.bellman_iteration = 0
-        self.bellman_edge_index = 0
-        self.bellman_changed = False
-        self.bellman_edges = self.get_edges_list()
-        
-        if self.dijkstra_radio.isChecked():
-            self.queue = []
-            heapq.heappush(self.queue, (0, self.start_node))
-        
-        self.history = []
-        self.current_history_index = -1
-        self.save_state("Инициализация: расстояния установлены в бесконечность, кроме стартовой вершины")
-        self.update_results_table()
-        self.update_progress()
+    # ==================== ОСНОВНЫЕ МЕТОДЫ АЛГОРИТМОВ ЧЕРЕЗ ПЛАГИНЫ ====================
 
-    def get_edges_list(self):
-        edges = []
-        for (u, v), weight in self.graph.items():
-            edges.append((u, v, weight))
-        return edges
+    def initialize_algorithm(self):
+        """Инициализация алгоритма через плагин"""
+        if self.dijkstra_radio.isChecked():
+            self.current_algorithm = self.algorithm_manager.set_current_plugin('dijkstra')
+        else:
+            self.current_algorithm = self.algorithm_manager.set_current_plugin('bellman')
+            
+        if self.current_algorithm:
+            initial_state = self.current_algorithm.initialize(
+                self.graph, self.start_node, self.positions, self.end_node
+            )
+            self.apply_algorithm_state(initial_state)
+            self.save_state("Инициализация алгоритма")
+
+    def apply_algorithm_state(self, state):
+        """Применяет состояние из плагина к основному приложению"""
+        self.distances = state['distances']
+        self.visited = state.get('visited', set())
+        self.previous = state.get('previous', {})
+        self.current_node = state.get('current_node')
+        self.final_path = state.get('final_path')
+        self.algorithm_finished = state.get('algorithm_finished', False)
+        self.algorithm_result = state.get('algorithm_result', "")
+        
+        if self.algorithm_finished and self.current_algorithm:
+            result = self.current_algorithm.get_result()
+            self.algorithm_result = result['message']
 
     def save_state(self, description=""):
         state = {
@@ -1204,9 +1524,6 @@ class ModernGraphVisualizer(QMainWindow):
             'final_path': self.final_path.copy() if self.final_path else None,
             'algorithm_finished': self.algorithm_finished,
             'algorithm_result': self.algorithm_result,
-            'bellman_iteration': self.bellman_iteration,
-            'bellman_edge_index': self.bellman_edge_index,
-            'bellman_changed': self.bellman_changed,
             'description': description
         }
         self.history = self.history[:self.current_history_index + 1]
@@ -1217,10 +1534,11 @@ class ModernGraphVisualizer(QMainWindow):
         if self.algorithm_finished:
             return
         
-        if self.dijkstra_radio.isChecked():
-            self.dijkstra_step()
-        else:
-            self.bellman_ford_step()
+        if self.current_algorithm:
+            state = self.current_algorithm.execute_step()
+            if state:
+                self.apply_algorithm_state(state)
+                self.save_state(state.get('description', 'Шаг алгоритма'))
         
         self.update_progress()
         self.update_results_table()
@@ -1243,141 +1561,20 @@ class ModernGraphVisualizer(QMainWindow):
         self.final_path = state['final_path'].copy() if state['final_path'] else None
         self.algorithm_finished = state['algorithm_finished']
         self.algorithm_result = state['algorithm_result']
-        self.bellman_iteration = state.get('bellman_iteration', 0)
-        self.bellman_edge_index = state.get('bellman_edge_index', 0)
-        self.bellman_changed = state.get('bellman_changed', False)
-
-    def dijkstra_step(self):
-        if not self.queue:
-            self.finalize_algorithm()
-            return
-        
-        current_distance, self.current_node = heapq.heappop(self.queue)
-        
-        if self.current_node in self.visited:
-            return
-        
-        self.visited.add(self.current_node)
-        self.save_state(f"Обрабатываем узел {self.current_node} (расстояние: {current_distance})")
-        
-        for (u, v), weight in self.graph.items():
-            if u == self.current_node and v not in self.visited:
-                new_distance = current_distance + weight
-                if new_distance < self.distances[v]:
-                    old_dist = self.distances[v]
-                    self.distances[v] = new_distance
-                    self.previous[v] = u
-                    heapq.heappush(self.queue, (new_distance, v))
-                    self.save_state(f"Обновлено расстояние до {v}: {old_dist} -> {new_distance}")
-        
-        if self.current_node == self.end_node:
-            self.finalize_algorithm()
-
-    def bellman_ford_step(self):
-        if self.bellman_iteration < len(self.positions) - 1:
-            if self.bellman_edge_index < len(self.bellman_edges):
-                u, v, weight = self.bellman_edges[self.bellman_edge_index]
-                self.current_node = u
-                
-                if self.distances[u] != float('inf') and self.distances[u] + weight < self.distances[v]:
-                    old_dist = self.distances[v]
-                    self.distances[v] = self.distances[u] + weight
-                    self.previous[v] = u
-                    self.bellman_changed = True
-                    
-                    description = f"Итерация {self.bellman_iteration + 1}: Ребро {u}→{v} ({weight}) - обновлено {old_dist:.1f}→{self.distances[v]:.1f}"
-                    self.save_state(description)
-                else:
-                    if self.bellman_edge_index % 3 == 0:
-                        description = f"Итерация {self.bellman_iteration + 1}: Ребро {u}→{v} ({weight}) - без изменений"
-                        self.save_state(description)
-                
-                self.bellman_edge_index += 1
-                return True
-            else:
-                if self.bellman_changed:
-                    self.bellman_iteration += 1
-                    self.bellman_edge_index = 0
-                    self.bellman_changed = False
-                    self.current_node = None
-                    self.save_state(f"Начало итерации {self.bellman_iteration + 1}")
-                    return True
-                else:
-                    self.bellman_iteration = len(self.positions) - 1
-                    self.check_negative_cycle()
-                    return True
-        else:
-            return self.check_negative_cycle()
-
-    def check_negative_cycle(self):
-        if self.bellman_edge_index < len(self.bellman_edges):
-            u, v, weight = self.bellman_edges[self.bellman_edge_index]
-            self.current_node = u
-            
-            if self.distances[u] != float('inf') and self.distances[u] + weight < self.distances[v]:
-                self.algorithm_finished = True
-                self.algorithm_result = f"Обнаружен цикл отрицательного веса! Ребро {u}→{v} ({weight})"
-                self.save_state(f"ОШИБКА: {self.algorithm_result}")
-                self.update_progress()
-                QMessageBox.warning(self, "Обнаружен отрицательный цикл", self.algorithm_result)
-                return False
-            
-            self.bellman_edge_index += 1
-            if self.bellman_edge_index % 3 == 0:
-                self.save_state(f"Проверка на отрицательные циклы: ребро {u}→{v}")
-            return True
-        else:
-            self.algorithm_finished = True
-            self.finalize_algorithm()
-            return False
-
-    def finalize_algorithm(self):
-        self.algorithm_finished = True
-        self.current_node = None
-        
-        if self.end_node in self.previous and self.distances[self.end_node] != float('inf'):
-            path = []
-            current = self.end_node
-            max_steps = len(self.positions)
-            
-            while current != self.start_node and max_steps > 0:
-                path.append(current)
-                if current not in self.previous:
-                    break
-                current = self.previous[current]
-                max_steps -= 1
-            
-            if max_steps > 0:
-                path.append(self.start_node)
-                path.reverse()
-                self.final_path = path
-                total_distance = self.distances[self.end_node]
-                self.algorithm_result = f"Найден путь: {' -> '.join(path)} (длина: {total_distance})"
-            else:
-                self.final_path = None
-                self.algorithm_result = "Не удалось построить путь"
-        else:
-            self.final_path = None
-            self.algorithm_result = f"Путь от {self.start_node} до {self.end_node} не найден"
-        
-        self.save_state(f"Завершено: {self.algorithm_result}")
-        self.status_label.setText(self.algorithm_result)
-        self.update_progress()
 
     def toggle_pause(self):
         self.pause = not self.pause
         if not self.pause:
             self.pause_btn.setText("❚❚")
             self.pause_btn.setToolTip("Пауза")
-        else:
-            self.pause_btn.setText("▶")
-            self.pause_btn.setToolTip("Старт")
-        
-        if not self.pause:
             self.animation_timer = QTimer()
             self.animation_timer.timeout.connect(self.auto_step)
             self.animation_timer.start(self.animation_speed)
-        
+        else:
+            self.pause_btn.setText("▶")
+            self.pause_btn.setToolTip("Старт")
+            if hasattr(self, 'animation_timer'):
+                self.animation_timer.stop()
 
     def auto_step(self):
         if self.pause or self.algorithm_finished:
@@ -1407,22 +1604,29 @@ class ModernGraphVisualizer(QMainWindow):
         
         if self.algorithm_finished:
             self.progress_bar.setValue(100)
-        elif self.dijkstra_radio.isChecked():
+        elif self.current_algorithm and isinstance(self.current_algorithm, DijkstraPlugin):
             total_nodes = len(self.positions)
             visited_nodes = len(self.visited)
             progress = int((visited_nodes / total_nodes) * 100)
             self.progress_bar.setValue(progress)
-        else:
+        elif self.current_algorithm and isinstance(self.current_algorithm, BellmanFordPlugin):
             total_iterations = len(self.positions)
-            if self.bellman_iteration < total_iterations - 1:
-                progress = int((self.bellman_iteration / (total_iterations - 1)) * 100)
-            else:
-                total_edges = len(self.bellman_edges)
-                if total_edges > 0:
-                    progress = 80 + int((self.bellman_edge_index / total_edges) * 20)
+            if hasattr(self.current_algorithm, 'iteration'):
+                iteration = self.current_algorithm.iteration
+                if iteration < total_iterations - 1:
+                    progress = int((iteration / (total_iterations - 1)) * 100)
                 else:
-                    progress = 100
-            self.progress_bar.setValue(min(progress, 100))
+                    total_edges = len(getattr(self.current_algorithm, 'edges', []))
+                    if total_edges > 0:
+                        edge_index = getattr(self.current_algorithm, 'edge_index', 0)
+                        progress = 80 + int((edge_index / total_edges) * 20)
+                    else:
+                        progress = 100
+                self.progress_bar.setValue(min(progress, 100))
+            else:
+                self.progress_bar.setValue(0)
+        else:
+            self.progress_bar.setValue(0)
 
     def update_results_table(self):
         self.results_tree.clear()
