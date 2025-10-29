@@ -874,6 +874,9 @@ class ModernGraphVisualizer(QMainWindow):
         
         self.dijkstra_radio.setStyleSheet(radio_style)
         self.bellman_radio.setStyleSheet(radio_style)
+
+        self.dijkstra_radio.setFocusPolicy(Qt.NoFocus)
+        self.bellman_radio.setFocusPolicy(Qt.NoFocus)
         
         self.algorithm_group.addButton(self.dijkstra_radio)
         self.algorithm_group.addButton(self.bellman_radio)
@@ -1208,6 +1211,102 @@ class ModernGraphVisualizer(QMainWindow):
                 font-size: 16px;
             }}
         """
+
+    def keyPressEvent(self, event):
+        """Обработка горячих клавиш"""
+        key = event.key()
+    
+        # Основные управления
+        if key == Qt.Key_Space:
+            self.toggle_pause()
+        elif key == Qt.Key_Right:
+            self.step_forward()
+        elif key == Qt.Key_Left:
+            self.step_backward()  
+        elif key == Qt.Key_R:
+            self.restart()
+        elif key == Qt.Key_F:
+            self.toggle_fullscreen()
+        
+        # Скорость анимации
+        elif key == Qt.Key_Plus or key == Qt.Key_Equal:
+            self.increase_speed()
+        elif key == Qt.Key_Minus:
+            self.decrease_speed()
+
+        # Навигация по графу
+        elif key == Qt.Key_I:
+            self.reset_view()
+        
+        # Быстрые действия
+        elif key == Qt.Key_G:
+            self.generate_random_graph()
+        elif key == Qt.Key_L:
+            self.load_graph_from_file()
+        
+        # Переключение алгоритмов
+        elif key == Qt.Key_1:
+            self.dijkstra_radio.setChecked(True)
+            self.restart()
+        elif key == Qt.Key_2:
+            self.bellman_radio.setChecked(True) 
+            self.restart()
+        
+        # Справка
+        elif key == Qt.Key_H:
+            self.show_shortcuts_help()
+        
+        else:
+            super().keyPressEvent(event)
+
+    def increase_speed(self):
+        """Увеличить скорость анимации"""
+        current_value = self.speed_slider.value()
+        if current_value > 0:
+            self.speed_slider.setValue(current_value - 1)
+
+    def decrease_speed(self):
+        """Уменьшить скорость анимации"""  
+        current_value = self.speed_slider.value()
+        if current_value < 5:
+            self.speed_slider.setValue(current_value + 1)
+
+    def reset_view(self):
+        """Сброс zoom и панорамирования"""
+        self.zoom_level = 1.0
+        self.pan_offset_x = 0
+        self.pan_offset_y = 0
+        self.canvas_widget.update()
+
+    def toggle_fullscreen(self):
+        """Переключение полноэкранного режима"""
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
+    def show_shortcuts_help(self):
+        """Показать справку по горячим клавишам"""
+        shortcuts = {
+            "Пробел": "Пауза/Старт анимации",
+            "Стрелка →": "Шаг вперед", 
+            "Стрелка ←": "Шаг назад",
+            "R": "Перезапуск алгоритма",
+            "F": "Полноэкранный режим",
+            "+/-": "Увеличить/уменьшить скорость",
+            "I": "Сброс масштаба и позиции",
+            "G": "Сгенерировать случайный граф",
+            "L": "Загрузить граф из файла", 
+            "1/2": "Переключить алгоритм (Дейкстра/Беллман)",
+            "H": "Эта справка"
+        }
+        
+        help_text = "Горячие клавиши:\n\n" + "\n".join(
+            f"{key}: {desc}" for key, desc in shortcuts.items()
+        )
+        
+        QMessageBox.information(self, "Справка по клавишам", help_text)
+
 
     def get_slider_style(self):
         return f"""
