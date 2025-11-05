@@ -701,6 +701,25 @@ class ModernGraphVisualizer(QMainWindow):
         }
         self.current_theme = self.themes['dark']
 
+    def setup_shortcuts_fix(self):
+        # Радио-кнопки алгоритмов
+        self.dijkstra_radio.setFocusPolicy(Qt.NoFocus)
+        self.bellman_radio.setFocusPolicy(Qt.NoFocus)
+    
+        # Кнопки управления
+        self.step_back_btn.setFocusPolicy(Qt.NoFocus)
+        self.step_forward_btn.setFocusPolicy(Qt.NoFocus) 
+        self.pause_btn.setFocusPolicy(Qt.NoFocus)
+        self.restart_btn.setFocusPolicy(Qt.NoFocus)
+        self.load_btn.setFocusPolicy(Qt.NoFocus)
+        self.random_btn.setFocusPolicy(Qt.NoFocus)
+    
+        # Слайдер скорости
+        self.speed_slider.setFocusPolicy(Qt.NoFocus)
+    
+        # Комбобоксы (опционально - если мешают)
+        self.start_combo.setFocusPolicy(Qt.NoFocus)
+
     def apply_theme(self):
         palette = QPalette()
         palette.setColor(QPalette.Window, QColor(self.current_theme['bg']))
@@ -874,9 +893,6 @@ class ModernGraphVisualizer(QMainWindow):
         
         self.dijkstra_radio.setStyleSheet(radio_style)
         self.bellman_radio.setStyleSheet(radio_style)
-
-        self.dijkstra_radio.setFocusPolicy(Qt.NoFocus)
-        self.bellman_radio.setFocusPolicy(Qt.NoFocus)
         
         self.algorithm_group.addButton(self.dijkstra_radio)
         self.algorithm_group.addButton(self.bellman_radio)
@@ -1630,15 +1646,22 @@ class ModernGraphVisualizer(QMainWindow):
         self.current_history_index = len(self.history) - 1
 
     def step_forward(self):
-        if self.algorithm_finished:
-            return
+    # Если мы в середине истории (после шага "назад")
+        if self.current_history_index < len(self.history) - 1:
+            # Просто переходим к следующему состоянию в истории
+            self.current_history_index += 1
+            self.restore_state()
+        else:
+            # Иначе выполняем новый шаг алгоритма
+            if self.algorithm_finished:
+                return
         
-        if self.current_algorithm:
-            state = self.current_algorithm.execute_step()
-            if state:
-                self.apply_algorithm_state(state)
-                self.save_state(state.get('description', 'Шаг алгоритма'))
-        
+            if self.current_algorithm:
+                state = self.current_algorithm.execute_step()
+                if state:
+                    self.apply_algorithm_state(state)
+                    self.save_state(state.get('description', 'Шаг алгоритма'))
+    
         self.update_progress()
         self.update_results_table()
         self.canvas_widget.update()
@@ -1651,6 +1674,24 @@ class ModernGraphVisualizer(QMainWindow):
             self.update_results_table()
             self.canvas_widget.update()
 
+    def save_state(self, description=""):
+        state = {
+            'distances': self.distances.copy(),
+            'visited': self.visited.copy(),
+            'previous': self.previous.copy(),
+            'current_node': self.current_node,
+            'final_path': self.final_path.copy() if self.final_path else None,
+            'algorithm_finished': self.algorithm_finished,
+            'algorithm_result': self.algorithm_result,
+            'description': description
+        }
+    
+            # Ключевое исправление: обрезаем историю ТОЛЬКО если мы не в середине
+        if self.current_history_index < len(self.history) - 1:
+            self.history = self.history[:self.current_history_index + 1]
+    
+        self.history.append(state)
+        self.current_history_index = len(self.history) - 1
     def restore_state(self):
         state = self.history[self.current_history_index]
         self.distances = state['distances'].copy()
