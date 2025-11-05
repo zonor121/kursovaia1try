@@ -700,11 +700,7 @@ class ModernGraphVisualizer(QMainWindow):
             }
         """)
         self.settings_btn.clicked.connect(self.show_shortcuts_dialog)
-        
-        # Добавь эту кнопку в верхнюю панель (в create_top_panel)
-        # Например, в file_layout после random_btn:
-        # file_layout.addWidget(self.settings_btn)
-    
+
     def show_shortcuts_dialog(self):
         dialog = ShortcutsDialog(self, self.shortcuts, self.default_shortcuts)
         dialog.exec()
@@ -764,25 +760,6 @@ class ModernGraphVisualizer(QMainWindow):
             }
         }
         self.current_theme = self.themes['dark']
-
-    def setup_shortcuts_fix(self):
-        # Радио-кнопки алгоритмов
-        self.dijkstra_radio.setFocusPolicy(Qt.NoFocus)
-        self.bellman_radio.setFocusPolicy(Qt.NoFocus)
-    
-        # Кнопки управления
-        self.step_back_btn.setFocusPolicy(Qt.NoFocus)
-        self.step_forward_btn.setFocusPolicy(Qt.NoFocus) 
-        self.pause_btn.setFocusPolicy(Qt.NoFocus)
-        self.restart_btn.setFocusPolicy(Qt.NoFocus)
-        self.load_btn.setFocusPolicy(Qt.NoFocus)
-        self.random_btn.setFocusPolicy(Qt.NoFocus)
-    
-        # Слайдер скорости
-        self.speed_slider.setFocusPolicy(Qt.NoFocus)
-    
-        # Комбобоксы (опционально - если мешают)
-        self.start_combo.setFocusPolicy(Qt.NoFocus)
 
     def apply_theme(self):
         palette = QPalette()
@@ -1313,7 +1290,10 @@ class ModernGraphVisualizer(QMainWindow):
         }
         
         # Загружаем настройки пользователя
-        self.shortcuts = self.load_shortcuts()
+        self.shortcuts = self.default_shortcuts.copy()
+
+        for action, key in self.shortcuts.items():
+            print(f"{action}: {key} ({QKeySequence(key).toString()})")
 
     def load_shortcuts(self):
         settings = QSettings("GraphVisualizer", "Shortcuts")
@@ -1926,6 +1906,77 @@ class ModernGraphVisualizer(QMainWindow):
                 item.setBackground(0, QColor(self.current_theme['danger']))
             elif node in self.visited:
                 item.setBackground(0, QColor(self.current_theme['accent']))
+
+class KeyInputDialog(QDialog):
+    def __init__(self, parent, action_name):
+        super().__init__(parent)
+        self.selected_key = None
+        self.setup_ui(action_name)
+        
+    def setup_ui(self, action_name):
+        self.setWindowTitle("Назначение клавиши")
+        self.setModal(True)
+        self.setFixedSize(400, 200)
+        
+        layout = QVBoxLayout()
+        
+        # Инструкция
+        instruction = QLabel(f"Нажмите клавишу для действия:\n{action_name}")
+        instruction.setStyleSheet("font-size: 14px; font-weight: bold; padding: 10px;")
+        instruction.setAlignment(Qt.AlignCenter)
+        layout.addWidget(instruction)
+        
+        # Отображение нажатой клавиши
+        self.key_label = QLabel("Нажмите любую клавишу...")
+        self.key_label.setStyleSheet("font-size: 16px; color: #bb86fc; padding: 20px;")
+        self.key_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.key_label)
+        
+        # Кнопки
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        
+        self.setLayout(layout)
+    
+    def on_accept(self):
+        """Проверяем что клавиша выбрана перед принятием"""
+        if self.selected_key is not None:
+            self.accept()
+        else:
+            QMessageBox.warning(self, "Ошибка", "Сначала нажмите клавишу!")
+    
+    def keyPressEvent(self, event):
+        key = event.key()
+        modifier = event.modifiers()
+        
+        # Игнорируем одиночные модификаторы
+        if key in [Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta]:
+            return
+            
+        # Esc - отмена
+        if key == Qt.Key_Escape:
+            self.reject()
+            return
+        
+        # Enter - подтверждение (если уже есть выбранная клавиша)
+        if key == Qt.Key_Return or key == Qt.Key_Enter:
+            if self.selected_key is not None:
+                self.accept()
+            return
+        
+        # Создаем QKeySequence
+        if modifier and key:
+            key_sequence = QKeySequence(modifier + key)
+        else:
+            key_sequence = QKeySequence(key)
+            
+        self.selected_key = key
+        self.key_label.setText(f"Выбрана клавиша: {key_sequence.toString()}")
+        event.accept()
+
+
 class ShortcutsDialog(QDialog):
     def __init__(self, parent, shortcuts, default_shortcuts):
         super().__init__(parent)
@@ -2034,7 +2085,7 @@ class ShortcutsDialog(QDialog):
         
         # Показываем диалог ввода новой клавиши
         dialog = KeyInputDialog(self, action_name)
-        if dialog.exec() == QDialog.Accepted and dialog.selected_key:
+        if dialog.exec() == QDialog.Accepted and dialog.selected_key is not None:
             new_key = dialog.selected_key
             
             # Проверяем конфликт
@@ -2107,65 +2158,6 @@ class ShortcutsDialog(QDialog):
             'help': 'Показать справку'
         }
         return names.get(action, action)
-
-
-class KeyInputDialog(QDialog):
-    """Диалог для ввода одной клавиши"""
-    def __init__(self, parent, action_name):
-        super().__init__(parent)
-        self.selected_key = None
-        self.setup_ui(action_name)
-        
-    def setup_ui(self, action_name):
-        self.setWindowTitle("Назначение клавиши")
-        self.setModal(True)
-        self.setFixedSize(400, 200)
-        
-        layout = QVBoxLayout()
-        
-        # Инструкция
-        instruction = QLabel(f"Нажмите клавишу для действия:\n{action_name}")
-        instruction.setStyleSheet("font-size: 14px; font-weight: bold; padding: 10px;")
-        instruction.setAlignment(Qt.AlignCenter)
-        layout.addWidget(instruction)
-        
-        # Отображение нажатой клавиши
-        self.key_label = QLabel("Нажмите любую клавишу...")
-        self.key_label.setStyleSheet("font-size: 16px; color: #bb86fc; padding: 20px;")
-        self.key_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.key_label)
-        
-        # Кнопки
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-        
-        self.setLayout(layout)
-    
-    def keyPressEvent(self, event):
-        key = event.key()
-        modifier = event.modifiers()
-        
-        # Игнорируем одиночные модификаторы
-        if key in [Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta]:
-            return
-            
-        # Esc - отмена
-        if key == Qt.Key_Escape:
-            self.reject()
-            return
-        
-        # Создаем QKeySequence
-        if modifier and key:
-            key_sequence = QKeySequence(modifier + key)
-        else:
-            key_sequence = QKeySequence(key)
-            
-        self.selected_key = key
-        self.key_label.setText(f"Выбрана клавиша: {key_sequence.toString()}")
-        event.accept()
-
 
 def main():
     app = QApplication(sys.argv)
