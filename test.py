@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QSlider, QSplitter, QFrame, QProgressBar, QButtonGroup,
     QGraphicsBlurEffect, QHeaderView
 )
-from PySide6.QtCore import Qt, QTimer, QRect
+from PySide6.QtCore import Qt, QTimer, QRect, QSettings
 from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QFont, QPalette, QLinearGradient, QRadialGradient
 
 
@@ -681,6 +681,8 @@ class ModernGraphVisualizer(QMainWindow):
         self.setup_ui()
         self.initialize_default_graph()
         self.initialize_algorithm()
+        self.setup_shortcuts()
+        
 
     def setup_themes(self):
         self.themes = {
@@ -1228,51 +1230,108 @@ class ModernGraphVisualizer(QMainWindow):
             }}
         """
 
+    def setup_shortcuts(self):
+        # Стандартные клавиши по умолчанию
+        self.default_shortcuts = {
+            'pause': Qt.Key_Space,
+            'step_forward': Qt.Key_Right, 
+            'step_backward': Qt.Key_Left,
+            'restart': Qt.Key_R,
+            'fullscreen': Qt.Key_F,
+            'increase_speed': Qt.Key_Plus,
+            'decrease_speed': Qt.Key_Minus,
+            'reset_view': Qt.Key_I,
+            'generate_graph': Qt.Key_G,
+            'load_graph': Qt.Key_L,
+            'algorithm_1': Qt.Key_1,
+            'algorithm_2': Qt.Key_2,
+            'help': Qt.Key_H
+        }
+        
+        # Загружаем настройки пользователя
+        self.shortcuts = self.load_shortcuts()
+
+    def load_shortcuts(self):
+        settings = QSettings("GraphVisualizer", "Shortcuts")
+        shortcuts = {}
+        
+        for action, default_key in self.default_shortcuts.items():
+            # Загружаем значение или используем значение по умолчанию
+            key_value = settings.value(f"shortcuts/{action}", defaultValue=default_key)
+            shortcuts[action] = int(key_value)
+        
+        return shortcuts
+
+    def save_shortcuts(self, shortcuts=None):
+        """Сохраняет горячие клавиши в настройки"""
+        if shortcuts is None:
+            shortcuts = self.shortcuts
+            
+        settings = QSettings("GraphVisualizer", "Shortcuts")
+        
+        for action, key in shortcuts.items():
+            settings.setValue(f"shortcuts/{action}", key)
+        
+        settings.sync()  # Принудительно сохраняем
+
+    def reset_shortcuts_to_default(self):
+        """Сбрасывает горячие клавиши к значениям по умолчанию"""
+        self.shortcuts = self.default_shortcuts.copy()
+        self.save_shortcuts()
+
     def keyPressEvent(self, event):
-        """Обработка горячих клавиш"""
         key = event.key()
-    
-        # Основные управления
+        
+        # Перехватываем ВСЕ нужные клавиши и явно принимаем событие
         if key == Qt.Key_Space:
             self.toggle_pause()
+            event.accept()
         elif key == Qt.Key_Right:
             self.step_forward()
+            event.accept()
         elif key == Qt.Key_Left:
-            self.step_backward()  
+            self.step_backward()
+            event.accept()
         elif key == Qt.Key_R:
             self.restart()
+            event.accept()
         elif key == Qt.Key_F:
             self.toggle_fullscreen()
-        
-        # Скорость анимации
+            event.accept()
         elif key == Qt.Key_Plus or key == Qt.Key_Equal:
             self.increase_speed()
+            event.accept()
         elif key == Qt.Key_Minus:
             self.decrease_speed()
-
-        # Навигация по графу
+            event.accept()
         elif key == Qt.Key_I:
             self.reset_view()
-        
-        # Быстрые действия
+            event.accept()
         elif key == Qt.Key_G:
             self.generate_random_graph()
+            event.accept()
         elif key == Qt.Key_L:
             self.load_graph_from_file()
-        
-        # Переключение алгоритмов
+            event.accept()
         elif key == Qt.Key_1:
             self.dijkstra_radio.setChecked(True)
             self.restart()
+            event.accept()
         elif key == Qt.Key_2:
-            self.bellman_radio.setChecked(True) 
+            self.bellman_radio.setChecked(True)
             self.restart()
-        
-        # Справка
+            event.accept()
         elif key == Qt.Key_H:
             self.show_shortcuts_help()
-        
+            event.accept()
+        elif key == Qt.Key_Escape:
+            if self.isFullScreen():
+                self.showNormal()
+                event.accept()
+            else:
+                super().keyPressEvent(event)
         else:
+            # Все остальные клавиши передаем стандартной обработке
             super().keyPressEvent(event)
 
     def increase_speed(self):
