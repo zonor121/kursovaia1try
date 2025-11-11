@@ -7,10 +7,10 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QComboBox, QRadioButton, QGroupBox,
     QFileDialog, QMessageBox, QTreeWidget, QTreeWidgetItem,
     QSlider, QSplitter, QFrame, QProgressBar, QButtonGroup,
-    QGraphicsBlurEffect, QHeaderView
+    QGraphicsBlurEffect, QHeaderView, QDialogButtonBox, QDialog, QTableWidget, QTableWidgetItem
 )
-from PySide6.QtCore import Qt, QTimer, QRect
-from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QFont, QPalette, QLinearGradient, QRadialGradient
+from PySide6.QtCore import Qt, QTimer, QRect, QSettings 
+from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QFont, QPalette, QLinearGradient, QRadialGradient, QKeySequence
 
 
 # ==================== БАЗОВЫЙ КЛАСС АЛГОРИТМА ====================
@@ -681,6 +681,66 @@ class ModernGraphVisualizer(QMainWindow):
         self.setup_ui()
         self.initialize_default_graph()
         self.initialize_algorithm()
+        self.setup_shortcuts()
+        self.setup_shortcuts_button()
+
+    def setup_shortcuts_button(self):
+        self.settings_btn = QPushButton("⚙️ Настройки клавиш")
+        self.settings_btn.setStyleSheet("""
+            QPushButton {
+                background: #bb86fc;
+                color: black;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #9d65d5;
+            }
+        """)
+        self.settings_btn.clicked.connect(self.show_shortcuts_dialog)
+
+    def show_shortcuts_dialog(self):
+        dialog = ShortcutsDialog(self, self.shortcuts, self.default_shortcuts)
+        dialog.exec()
+    
+    def show_shortcuts_help(self):
+        help_text = "Текущие горячие клавиши:\n\n"
+        
+        key_names = {
+            'pause': 'Пауза/Старт',
+            'step_forward': 'Шаг вперед', 
+            'step_backward': 'Шаг назад',
+            'restart': 'Перезапуск',
+            'fullscreen': 'Полный экран',
+            'increase_speed': 'Увеличить скорость',
+            'decrease_speed': 'Уменьшить скорость', 
+            'reset_view': 'Сброс вида',
+            'generate_graph': 'Случайный граф',
+            'load_graph': 'Загрузить граф',
+            'algorithm_1': 'Алгоритм 1 (Дейкстра)',
+            'algorithm_2': 'Алгоритм 2 (Беллман-Форд)',
+            'help': 'Справка'
+        }
+        
+        for action, key in self.shortcuts.items():
+            if key != 0:  # Пропускаем очищенные клавиши
+                key_name = QKeySequence(key).toString()
+                help_text += f"{key_names[action]}: {key_name}\n"
+        
+        help_text += "\n⚙️ Нажмите 'Настройки клавиш' для изменения"
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Горячие клавиши")
+        msg.setText(help_text)
+        
+        # Добавляем кнопку настроек в сообщение
+        settings_btn = msg.addButton("⚙️ Настройки клавиш", QMessageBox.ActionRole)
+        settings_btn.clicked.connect(self.show_shortcuts_dialog)
+        
+        msg.addButton(QMessageBox.Ok)
+        msg.exec()
 
     def setup_themes(self):
         self.themes = {
@@ -906,9 +966,11 @@ class ModernGraphVisualizer(QMainWindow):
         
         self.load_btn = self.create_styled_button("📁 Загрузить", self.load_graph_from_file)
         self.random_btn = self.create_styled_button("🎲 Случайный", self.generate_random_graph)
+        self.settings_btn = self.create_styled_button("⚙️ Настройки", self.show_shortcuts_dialog)
         
         file_layout.addWidget(self.load_btn)
         file_layout.addWidget(self.random_btn)
+        file_layout.addWidget(self.settings_btn)
         
         top_layout.addLayout(file_layout)
         
@@ -1208,6 +1270,162 @@ class ModernGraphVisualizer(QMainWindow):
                 font-size: 16px;
             }}
         """
+
+    def setup_shortcuts(self):
+        # Стандартные клавиши по умолчанию
+        self.default_shortcuts = {
+            'pause': Qt.Key_Space,
+            'step_forward': Qt.Key_Right, 
+            'step_backward': Qt.Key_Left,
+            'restart': Qt.Key_R,
+            'fullscreen': Qt.Key_F,
+            'increase_speed': Qt.Key_Plus,
+            'decrease_speed': Qt.Key_Minus,
+            'reset_view': Qt.Key_I,
+            'generate_graph': Qt.Key_G,
+            'load_graph': Qt.Key_L,
+            'algorithm_1': Qt.Key_1,
+            'algorithm_2': Qt.Key_2,
+            'help': Qt.Key_H
+        }
+        
+        # Загружаем настройки пользователя
+        self.shortcuts = self.default_shortcuts.copy()
+
+        for action, key in self.shortcuts.items():
+            print(f"{action}: {key} ({QKeySequence(key).toString()})")
+
+    def load_shortcuts(self):
+        settings = QSettings("GraphVisualizer", "Shortcuts")
+        shortcuts = {}
+        
+        for action, default_key in self.default_shortcuts.items():
+            # Загружаем значение или используем значение по умолчанию
+            key_value = settings.value(f"shortcuts/{action}", defaultValue=default_key)
+            shortcuts[action] = int(key_value)
+        
+        return shortcuts
+
+    def save_shortcuts(self, shortcuts=None):
+        """Сохраняет горячие клавиши в настройки"""
+        if shortcuts is None:
+            shortcuts = self.shortcuts
+            
+        settings = QSettings("GraphVisualizer", "Shortcuts")
+        
+        for action, key in shortcuts.items():
+            settings.setValue(f"shortcuts/{action}", key)
+        
+        settings.sync()  # Принудительно сохраняем
+
+    def reset_shortcuts_to_default(self):
+        """Сбрасывает горячие клавиши к значениям по умолчанию"""
+        self.shortcuts = self.default_shortcuts.copy()
+        self.save_shortcuts()
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        
+        # Перехватываем ВСЕ нужные клавиши и явно принимаем событие
+        if key == Qt.Key_Space:
+            self.toggle_pause()
+            event.accept()
+        elif key == Qt.Key_Right:
+            self.step_forward()
+            event.accept()
+        elif key == Qt.Key_Left:
+            self.step_backward()
+            event.accept()
+        elif key == Qt.Key_R:
+            self.restart()
+            event.accept()
+        elif key == Qt.Key_F:
+            self.toggle_fullscreen()
+            event.accept()
+        elif key == Qt.Key_Plus or key == Qt.Key_Equal:
+            self.increase_speed()
+            event.accept()
+        elif key == Qt.Key_Minus:
+            self.decrease_speed()
+            event.accept()
+        elif key == Qt.Key_I:
+            self.reset_view()
+            event.accept()
+        elif key == Qt.Key_G:
+            self.generate_random_graph()
+            event.accept()
+        elif key == Qt.Key_L:
+            self.load_graph_from_file()
+            event.accept()
+        elif key == Qt.Key_1:
+            self.dijkstra_radio.setChecked(True)
+            self.restart()
+            event.accept()
+        elif key == Qt.Key_2:
+            self.bellman_radio.setChecked(True)
+            self.restart()
+            event.accept()
+        elif key == Qt.Key_H:
+            self.show_shortcuts_help()
+            event.accept()
+        elif key == Qt.Key_Escape:
+            if self.isFullScreen():
+                self.showNormal()
+                event.accept()
+            else:
+                super().keyPressEvent(event)
+        else:
+            # Все остальные клавиши передаем стандартной обработке
+            super().keyPressEvent(event)
+
+    def increase_speed(self):
+        """Увеличить скорость анимации"""
+        current_value = self.speed_slider.value()
+        if current_value > 0:
+            self.speed_slider.setValue(current_value - 1)
+
+    def decrease_speed(self):
+        """Уменьшить скорость анимации"""  
+        current_value = self.speed_slider.value()
+        if current_value < 5:
+            self.speed_slider.setValue(current_value + 1)
+
+    def reset_view(self):
+        """Сброс zoom и панорамирования"""
+        self.zoom_level = 1.0
+        self.pan_offset_x = 0
+        self.pan_offset_y = 0
+        self.canvas_widget.update()
+
+    def toggle_fullscreen(self):
+        """Переключение полноэкранного режима"""
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
+    def show_shortcuts_help(self):
+        """Показать справку по горячим клавишам"""
+        shortcuts = {
+            "Пробел": "Пауза/Старт анимации",
+            "Стрелка →": "Шаг вперед", 
+            "Стрелка ←": "Шаг назад",
+            "R": "Перезапуск алгоритма",
+            "F": "Полноэкранный режим",
+            "+/-": "Увеличить/уменьшить скорость",
+            "I": "Сброс масштаба и позиции",
+            "G": "Сгенерировать случайный граф",
+            "L": "Загрузить граф из файла", 
+            "1/2": "Переключить алгоритм (Дейкстра/Беллман)",
+            "H": "Эта справка"
+        }
+        
+        help_text = "Горячие клавиши:\n\n" + "\n".join(
+            f"{key}: {desc}" for key, desc in shortcuts.items()
+        )
+        
+        QMessageBox.information(self, "Справка по клавишам", help_text)
+
 
     def get_slider_style(self):
         return f"""
@@ -1531,15 +1749,22 @@ class ModernGraphVisualizer(QMainWindow):
         self.current_history_index = len(self.history) - 1
 
     def step_forward(self):
-        if self.algorithm_finished:
-            return
+    # Если мы в середине истории (после шага "назад")
+        if self.current_history_index < len(self.history) - 1:
+            # Просто переходим к следующему состоянию в истории
+            self.current_history_index += 1
+            self.restore_state()
+        else:
+            # Иначе выполняем новый шаг алгоритма
+            if self.algorithm_finished:
+                return
         
-        if self.current_algorithm:
-            state = self.current_algorithm.execute_step()
-            if state:
-                self.apply_algorithm_state(state)
-                self.save_state(state.get('description', 'Шаг алгоритма'))
-        
+            if self.current_algorithm:
+                state = self.current_algorithm.execute_step()
+                if state:
+                    self.apply_algorithm_state(state)
+                    self.save_state(state.get('description', 'Шаг алгоритма'))
+    
         self.update_progress()
         self.update_results_table()
         self.canvas_widget.update()
@@ -1552,6 +1777,24 @@ class ModernGraphVisualizer(QMainWindow):
             self.update_results_table()
             self.canvas_widget.update()
 
+    def save_state(self, description=""):
+        state = {
+            'distances': self.distances.copy(),
+            'visited': self.visited.copy(),
+            'previous': self.previous.copy(),
+            'current_node': self.current_node,
+            'final_path': self.final_path.copy() if self.final_path else None,
+            'algorithm_finished': self.algorithm_finished,
+            'algorithm_result': self.algorithm_result,
+            'description': description
+        }
+    
+            # Ключевое исправление: обрезаем историю ТОЛЬКО если мы не в середине
+        if self.current_history_index < len(self.history) - 1:
+            self.history = self.history[:self.current_history_index + 1]
+    
+        self.history.append(state)
+        self.current_history_index = len(self.history) - 1
     def restore_state(self):
         state = self.history[self.current_history_index]
         self.distances = state['distances'].copy()
@@ -1664,6 +1907,257 @@ class ModernGraphVisualizer(QMainWindow):
             elif node in self.visited:
                 item.setBackground(0, QColor(self.current_theme['accent']))
 
+class KeyInputDialog(QDialog):
+    def __init__(self, parent, action_name):
+        super().__init__(parent)
+        self.selected_key = None
+        self.setup_ui(action_name)
+        
+    def setup_ui(self, action_name):
+        self.setWindowTitle("Назначение клавиши")
+        self.setModal(True)
+        self.setFixedSize(400, 200)
+        
+        layout = QVBoxLayout()
+        
+        # Инструкция
+        instruction = QLabel(f"Нажмите клавишу для действия:\n{action_name}")
+        instruction.setStyleSheet("font-size: 14px; font-weight: bold; padding: 10px;")
+        instruction.setAlignment(Qt.AlignCenter)
+        layout.addWidget(instruction)
+        
+        # Отображение нажатой клавиши
+        self.key_label = QLabel("Нажмите любую клавишу...")
+        self.key_label.setStyleSheet("font-size: 16px; color: #bb86fc; padding: 20px;")
+        self.key_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.key_label)
+        
+        # Кнопки
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        
+        self.setLayout(layout)
+    
+    def on_accept(self):
+        """Проверяем что клавиша выбрана перед принятием"""
+        if self.selected_key is not None:
+            self.accept()
+        else:
+            QMessageBox.warning(self, "Ошибка", "Сначала нажмите клавишу!")
+    
+    def keyPressEvent(self, event):
+        key = event.key()
+        modifier = event.modifiers()
+        
+        # Игнорируем одиночные модификаторы
+        if key in [Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta]:
+            return
+            
+        # Esc - отмена
+        if key == Qt.Key_Escape:
+            self.reject()
+            return
+        
+        # Enter - подтверждение (если уже есть выбранная клавиша)
+        if key == Qt.Key_Return or key == Qt.Key_Enter:
+            if self.selected_key is not None:
+                self.accept()
+            return
+        
+        # Создаем QKeySequence
+        if modifier and key:
+            key_sequence = QKeySequence(modifier + key)
+        else:
+            key_sequence = QKeySequence(key)
+            
+        self.selected_key = key
+        self.key_label.setText(f"Выбрана клавиша: {key_sequence.toString()}")
+        event.accept()
+
+
+class ShortcutsDialog(QDialog):
+    def __init__(self, parent, shortcuts, default_shortcuts):
+        super().__init__(parent)
+        self.parent = parent
+        self.shortcuts = shortcuts.copy()
+        self.default_shortcuts = default_shortcuts
+        self.setup_ui()
+        
+    def setup_ui(self):
+        self.setWindowTitle("Настройка горячих клавиш")
+        self.setMinimumSize(600, 700)
+        self.setModal(True)
+        
+        layout = QVBoxLayout()
+        
+        # Заголовок
+        title = QLabel("Настройка горячих клавиш")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; padding: 10px;")
+        layout.addWidget(title)
+        
+        # Инструкция
+        instruction = QLabel("Нажмите 'Изменить' для выбора новой клавиши")
+        instruction.setStyleSheet("color: #bb86fc; padding: 5px;")
+        instruction.setWordWrap(True)
+        layout.addWidget(instruction)
+        
+        # Таблица горячих клавиш
+        self.table = QTableWidget()
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels(["Действие", "Горячая клавиша", "Действие"])
+        self.table.horizontalHeader().setStretchLastSection(False)
+        self.table.setColumnWidth(0, 250)  # Действие
+        self.table.setColumnWidth(1, 150)  # Клавиша
+        self.table.setColumnWidth(2, 100)  # Кнопка
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.verticalHeader().setVisible(False)
+        
+        self.populate_table()
+        layout.addWidget(self.table)
+        
+        # Кнопки управления
+        button_layout = QHBoxLayout()
+        
+        self.reset_btn = QPushButton("Сбросить к стандартным")
+        self.reset_btn.clicked.connect(self.reset_to_default)
+        
+        button_layout.addWidget(self.reset_btn)
+        button_layout.addStretch()
+        
+        layout.addLayout(button_layout)
+        
+        # Кнопки OK/Отмена
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.save_and_close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        
+        self.setLayout(layout)
+        
+    def populate_table(self):
+        action_names = {
+            'pause': 'Пауза/Старт анимации',
+            'step_forward': 'Шаг вперед', 
+            'step_backward': 'Шаг назад',
+            'restart': 'Перезапуск алгоритма',
+            'fullscreen': 'Полноэкранный режим',
+            'increase_speed': 'Увеличить скорость',
+            'decrease_speed': 'Уменьшить скорость',
+            'reset_view': 'Сброс масштаба и позиции',
+            'generate_graph': 'Сгенерировать случайный граф',
+            'load_graph': 'Загрузить граф из файла',
+            'algorithm_1': 'Алгоритм Дейкстры',
+            'algorithm_2': 'Алгоритм Беллмана-Форда',
+            'help': 'Показать справку'
+        }
+        
+        self.table.setRowCount(len(self.shortcuts))
+        
+        for row, (action, key) in enumerate(self.shortcuts.items()):
+            # Действие
+            action_item = QTableWidgetItem(action_names.get(action, action))
+            action_item.setData(Qt.UserRole, action)
+            action_item.setFlags(action_item.flags() & ~Qt.ItemIsEditable)
+            
+            # Клавиша
+            key_text = QKeySequence(key).toString() if key != 0 else "Не назначено"
+            key_item = QTableWidgetItem(key_text)
+            key_item.setData(Qt.UserRole, key)
+            key_item.setFlags(key_item.flags() & ~Qt.ItemIsEditable)
+            
+            # Кнопка "Изменить"
+            change_btn = QPushButton("Изменить")
+            change_btn.clicked.connect(lambda checked, r=row: self.change_shortcut(r))
+            
+            self.table.setItem(row, 0, action_item)
+            self.table.setItem(row, 1, key_item)
+            self.table.setCellWidget(row, 2, change_btn)
+            
+        self.table.resizeColumnsToContents()
+    
+    def change_shortcut(self, row):
+        """Запускает процесс изменения клавиши для указанной строки"""
+        action_item = self.table.item(row, 0)
+        action = action_item.data(Qt.UserRole)
+        action_name = self.get_action_name(action)
+        
+        # Показываем диалог ввода новой клавиши
+        dialog = KeyInputDialog(self, action_name)
+        if dialog.exec() == QDialog.Accepted and dialog.selected_key is not None:
+            new_key = dialog.selected_key
+            
+            # Проверяем конфликт
+            conflict_action = self.find_key_conflict(new_key, action)
+            if conflict_action and new_key != 0:
+                conflict_name = self.get_action_name(conflict_action)
+                reply = QMessageBox.question(
+                    self, 
+                    "Конфликт клавиш", 
+                    f"Клавиша {QKeySequence(new_key).toString()} уже назначена на '{conflict_name}'. Заменить?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if reply == QMessageBox.No:
+                    return
+                # Если Yes - удаляем старое назначение
+                self.shortcuts[conflict_action] = 0
+            
+            # Назначаем новую клавишу
+            self.shortcuts[action] = new_key
+            self.update_table_row(action)
+    
+    def find_key_conflict(self, key, current_action):
+        """Находит конфликт для клавиши (кроме текущего действия)"""
+        if key == 0:
+            return None
+            
+        for action, action_key in self.shortcuts.items():
+            if action != current_action and action_key == key:
+                return action
+        return None
+    
+    def update_table_row(self, action):
+        """Обновляет строку в таблице для указанного действия"""
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item and item.data(Qt.UserRole) == action:
+                key = self.shortcuts[action]
+                key_text = QKeySequence(key).toString() if key != 0 else "Не назначено"
+                self.table.item(row, 1).setText(key_text)
+                self.table.item(row, 1).setData(Qt.UserRole, key)
+                break
+            
+    def reset_to_default(self):
+        reply = QMessageBox.question(self, "Сброс настроек", 
+                                   "Вернуть все горячие клавиши к значениям по умолчанию?",
+                                   QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.shortcuts = self.default_shortcuts.copy()
+            # Обновляем все строки таблицы
+            for action in self.shortcuts.keys():
+                self.update_table_row(action)
+            
+    def save_and_close(self):
+        self.accept()
+        
+    def get_action_name(self, action):
+        names = {
+            'pause': 'Пауза/Старт анимации',
+            'step_forward': 'Шаг вперед', 
+            'step_backward': 'Шаг назад',
+            'restart': 'Перезапуск алгоритма',
+            'fullscreen': 'Полноэкранный режим',
+            'increase_speed': 'Увеличить скорость',
+            'decrease_speed': 'Уменьшить скорость',
+            'reset_view': 'Сброс масштаба и позиции',
+            'generate_graph': 'Сгенерировать случайный граф',
+            'load_graph': 'Загрузить граф из файла',
+            'algorithm_1': 'Алгоритм Дейкстры',
+            'algorithm_2': 'Алгоритм Беллмана-Форда',
+            'help': 'Показать справку'
+        }
+        return names.get(action, action)
 
 def main():
     app = QApplication(sys.argv)
