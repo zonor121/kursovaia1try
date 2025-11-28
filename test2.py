@@ -377,7 +377,7 @@ class GraphCanvas(QWidget):
         self.parent = parent
         self.setMinimumSize(800, 600)
         self.setMouseTracking(True)
-        self.setFocusPolicy(Qt.NoFocus)  # Не захватывать фокус клавиатуры
+        self.setFocusPolicy(Qt.StrongFocus)  # Получать фокус клавиатуры
         
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -691,6 +691,10 @@ class GraphCanvas(QWidget):
                 return node
         return None
 
+    def keyPressEvent(self, event):
+        """Перенаправляем обработку клавиш на главное окно"""
+        self.parent.keyPressEvent(event)
+
     def wheelEvent(self, event):
         delta = event.angleDelta().y()
         if delta > 0:
@@ -750,6 +754,11 @@ class ModernGraphVisualizer(QMainWindow):
         self.initialize_default_graph()
         self.initialize_algorithm()
         self.setup_shortcuts()
+
+        # Устанавливаем фокус на холст для обработки клавиатурных команд
+        self.activateWindow()
+        self.raise_()
+        QTimer.singleShot(100, lambda: self.canvas_widget.setFocus())
     
     def setup_themes(self):
         self.themes = {
@@ -1020,6 +1029,7 @@ class ModernGraphVisualizer(QMainWindow):
                 color: {self.current_theme['text_secondary']};
             }}
         """)
+        btn.setFocusPolicy(Qt.NoFocus)
         btn.clicked.connect(callback)
         return btn
 
@@ -1069,6 +1079,7 @@ class ModernGraphVisualizer(QMainWindow):
         start_layout.addWidget(QLabel("Старт:"))
         self.start_combo = QComboBox()
         self.start_combo.setStyleSheet(self.get_combobox_style())
+        self.start_combo.setFocusPolicy(Qt.NoFocus)
         self.start_combo.currentTextChanged.connect(self.on_node_selection_changed)
         start_layout.addWidget(self.start_combo)
         node_layout.addLayout(start_layout)
@@ -1077,6 +1088,7 @@ class ModernGraphVisualizer(QMainWindow):
         end_layout.addWidget(QLabel("Конец:"))
         self.end_combo = QComboBox()
         self.end_combo.setStyleSheet(self.get_combobox_style())
+        self.end_combo.setFocusPolicy(Qt.NoFocus)
         self.end_combo.currentTextChanged.connect(self.on_node_selection_changed)
         end_layout.addWidget(self.end_combo)
         node_layout.addLayout(end_layout)
@@ -1379,12 +1391,12 @@ class ModernGraphVisualizer(QMainWindow):
         # Стандартные клавиши по умолчанию
         self.default_shortcuts = {
             'pause': Qt.Key_Space,
-            'step_forward': Qt.Key_Right, 
+            'step_forward': Qt.Key_Right,
             'step_backward': Qt.Key_Left,
             'restart': Qt.Key_R,
             'fullscreen': Qt.Key_F,
-            'increase_speed': Qt.Key_Plus,
-            'decrease_speed': Qt.Key_Minus,
+            'increase_speed': Qt.Key_Minus,  # Поменяли местами: "-" увеличивает скорость
+            'decrease_speed': Qt.Key_Plus,  # "+" уменьшает скорость
             'reset_view': Qt.Key_I,
             'generate_graph': Qt.Key_G,
             'load_graph': Qt.Key_L,
@@ -1392,8 +1404,35 @@ class ModernGraphVisualizer(QMainWindow):
             'algorithm_2': Qt.Key_2,
             'help': Qt.Key_H
         }
-        
+
         self.shortcuts = self.default_shortcuts.copy()
+
+        # Устанавливаем QShortcut для надежного перехвата клавиш
+        from PySide6.QtGui import QShortcut, QKeySequence
+
+        QShortcut(QKeySequence("Space"), self, self.toggle_pause)
+        QShortcut(QKeySequence("Right"), self, self.step_forward)
+        QShortcut(QKeySequence("Left"), self, self.step_backward)
+        QShortcut(QKeySequence("R"), self, self.restart)
+        QShortcut(QKeySequence("F"), self, self.toggle_fullscreen)
+        QShortcut(QKeySequence("="), self, self.decrease_speed)  # "+" уменьшает скорость
+        QShortcut(QKeySequence("-"), self, self.increase_speed)  # "-" увеличивает скорость
+        QShortcut(QKeySequence("I"), self, self.reset_view)
+        QShortcut(QKeySequence("G"), self, self.generate_random_graph)
+        QShortcut(QKeySequence("L"), self, self.load_graph_from_file)
+        QShortcut(QKeySequence("1"), self, lambda: self.set_algorithm(1))
+        QShortcut(QKeySequence("2"), self, lambda: self.set_algorithm(2))
+        QShortcut(QKeySequence("H"), self, self.show_shortcuts_help)
+        QShortcut(QKeySequence("Escape"), self, lambda: self.showNormal() if self.isFullScreen() else None)
+
+    def set_algorithm(self, algorithm_num):
+        """Установка алгоритма по номеру"""
+        if algorithm_num == 1:
+            self.dijkstra_radio.setChecked(True)
+            self.restart()
+        elif algorithm_num == 2:
+            self.bellman_radio.setChecked(True)
+            self.restart()
 
     def keyPressEvent(self, event):
         key = event.key()
