@@ -377,6 +377,7 @@ class GraphCanvas(QWidget):
         self.parent = parent
         self.setMinimumSize(800, 600)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.NoFocus)  # Не захватывать фокус клавиатуры
         
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -1841,24 +1842,6 @@ class ModernGraphVisualizer(QMainWindow):
             self.update_results_table()
             self.canvas_widget.update()
 
-    def save_state(self, description=""):
-        state = {
-            'distances': self.distances.copy(),
-            'visited': self.visited.copy(),
-            'previous': self.previous.copy(),
-            'current_node': self.current_node,
-            'final_path': self.final_path.copy() if self.final_path else None,
-            'algorithm_finished': self.algorithm_finished,
-            'algorithm_result': self.algorithm_result,
-            'description': description
-        }
-    
-            # Ключевое исправление: обрезаем историю ТОЛЬКО если мы не в середине
-        if self.current_history_index < len(self.history) - 1:
-            self.history = self.history[:self.current_history_index + 1]
-    
-        self.history.append(state)
-        self.current_history_index = len(self.history) - 1
     def restore_state(self):
         state = self.history[self.current_history_index]
         self.distances = state['distances'].copy()
@@ -1976,6 +1959,7 @@ def main():
     app.setStyle('Fusion')
     window = ModernGraphVisualizer()
     window.show()
+    window.setFocus()  # Устанавливаем фокус на окно для работы клавиш
     sys.exit(app.exec())
 
 
