@@ -988,13 +988,10 @@ class ModernGraphVisualizer(QMainWindow):
         
         file_layout = QHBoxLayout()
         file_layout.setSpacing(6)
-        
+
         self.load_btn = self.create_styled_button("📁 Загрузить", self.load_graph_from_file)
-        self.random_btn = self.create_styled_button("🎲 Случайный", self.generate_random_graph)
-        
         file_layout.addWidget(self.load_btn)
-        file_layout.addWidget(self.random_btn)
-        
+
         top_layout.addLayout(file_layout)
         
         return top_frame
@@ -1098,13 +1095,36 @@ class ModernGraphVisualizer(QMainWindow):
         
         right_layout.addWidget(node_group)
         
+        # Группа генерации
+        generation_group = QGroupBox("Генерация графа")
+        generation_group.setStyleSheet(self.get_groupbox_style())
+        generation_layout = QVBoxLayout(generation_group)
+
+        self.graph_type_combo = QComboBox()
+        self.graph_type_combo.setStyleSheet(self.get_combobox_style())
+        self.graph_type_combo.setFocusPolicy(Qt.NoFocus)
+        self.graph_type_combo.addItems([
+            "Связный случайный",
+            "Полный граф",
+            "Дерево",
+            "Решётка",
+            "Двудольный",
+            "Звёздчатый"
+        ])
+        generation_layout.addWidget(self.graph_type_combo)
+
+        self.random_btn = self.create_styled_button("🎲 Генерировать", self.generate_random_graph)
+        generation_layout.addWidget(self.random_btn)
+
+        right_layout.addWidget(generation_group)
+
         # Группа скорости
         speed_group = QGroupBox("Скорость анимации")
         speed_group.setStyleSheet(self.get_groupbox_style())
         speed_layout = QVBoxLayout(speed_group)
         speed_layout.setContentsMargins(10, 12, 10, 12)
         speed_layout.setSpacing(8)
-        
+
         self.speed_slider = QSlider(Qt.Horizontal)
         self.speed_slider.setRange(0, 5)
         self.speed_slider.setValue(2)
@@ -1112,11 +1132,11 @@ class ModernGraphVisualizer(QMainWindow):
         self.speed_slider.setStyleSheet(self.get_slider_style())
         self.speed_slider.setMinimumHeight(25)
         speed_layout.addWidget(self.speed_slider)
-        
+
         self.speed_label = QLabel("Средняя скорость")
         self.speed_label.setStyleSheet(f"color: {self.current_theme['text']}; font-size: 10px; padding: 3px;")
         speed_layout.addWidget(self.speed_label)
-        
+
         right_layout.addWidget(speed_group)
         
         # Прогресс выполнения
@@ -1854,47 +1874,263 @@ class ModernGraphVisualizer(QMainWindow):
         self.original_positions = self.positions.copy()
 
     def generate_random_graph(self):
-        nodes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
-        num_nodes = random.randint(6, 8)
-        selected_nodes = nodes[:num_nodes]
-        
-        self.graph = {}
-        
-        for i in range(len(selected_nodes) - 1):
-            u = selected_nodes[i]
-            v = selected_nodes[i + 1]
-            weight = random.randint(1, 10)
-            self.add_edge(u, v, weight)
-        
-        num_extra_edges = random.randint(num_nodes, num_nodes + 3)
-        for _ in range(num_extra_edges):
-            u = random.choice(selected_nodes)
-            v = random.choice(selected_nodes)
-            if u != v and not self.has_edge(u, v):
-                weight = random.randint(1, 10)
-                if random.random() < 0.1:
-                    weight = -random.randint(1, 3)
-                self.add_edge(u, v, weight)
-        
-        self.calculate_positions()
+        """Генерирует случайный граф выбранного типа"""
+        graph_type = self.graph_type_combo.currentText()
+
+        # Доступные узлы
+        all_nodes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O']
+
+        # Генерируем соответствующий тип графа
+        if graph_type == "Связный случайный":
+            generated = self.generate_connected_graph(all_nodes)
+        elif graph_type == "Полный граф":
+            generated = self.generate_complete_graph(all_nodes)
+        elif graph_type == "Дерево":
+            generated = self.generate_tree_graph(all_nodes)
+        elif graph_type == "Решётка":
+            generated = self.generate_grid_graph(all_nodes)
+        elif graph_type == "Двудольный":
+            generated = self.generate_bipartite_graph(all_nodes)
+        elif graph_type == "Звёздчатый":
+            generated = self.generate_star_graph(all_nodes)
+        else:
+            # По умолчанию связный
+            generated = self.generate_connected_graph(all_nodes)
+
+        self.graph = generated['graph']
+        selected_nodes = generated['nodes']
+        graph_name = generated['name']
+
+        self.calculate_positions(selected_nodes)
+
         self.start_node = random.choice(selected_nodes)
         self.end_node = random.choice([n for n in selected_nodes if n != self.start_node])
         self.original_positions = self.positions.copy()
         self.update_selection_comboboxes()
-        
+
         has_negative = self.check_negative_weights()
         if has_negative and self.dijkstra_radio.isChecked():
             self.bellman_radio.setChecked(True)
-        
+
         self.restart()
         self.update_weights_table()
-        
-        graph_type = "ориентированный" if self.directed else "неориентированный"
-        QMessageBox.information(self, "Случайный граф", 
-                               f"Сгенерирован {graph_type} граф!\n"
+
+        is_directed = "ориентированный" if self.directed else "неориентированный"
+        QMessageBox.information(self, f"Сгенерирован {graph_name}",
+                               f"Тип: {graph_name} ({is_directed})\n"
                                f"Узлов: {len(selected_nodes)}\n"
                                f"Ребер: {self.get_edge_count()}\n"
                                f"Старт: {self.start_node}, Конец: {self.end_node}")
+
+    def generate_connected_graph(self, all_nodes):
+        """Генерирует связный случайный граф"""
+        num_nodes = random.randint(6, 8)
+        selected_nodes = all_nodes[:num_nodes]
+
+        graph = {}
+
+        # Создаем связный остов
+        for i in range(len(selected_nodes) - 1):
+            u = selected_nodes[i]
+            v = selected_nodes[i + 1]
+            weight = random.randint(1, 10)
+            self.add_edge_to_dict(graph, u, v, weight)
+
+        # Добавляем дополнительные ребра
+        num_extra_edges = random.randint(num_nodes, num_nodes + 3)
+        for _ in range(num_extra_edges):
+            u = random.choice(selected_nodes)
+            v = random.choice(selected_nodes)
+            if u != v and not self.has_edge_in_dict(graph, u, v):
+                weight = random.randint(1, 10)
+                if random.random() < 0.1:  # 10% отрицательных весов
+                    weight = -random.randint(1, 3)
+                self.add_edge_to_dict(graph, u, v, weight)
+
+        return {
+            'graph': graph,
+            'nodes': selected_nodes,
+            'name': 'Связный случайный граф'
+        }
+
+    def generate_complete_graph(self, all_nodes):
+        """Генерирует полный граф (все возможные ребра)"""
+        num_nodes = random.randint(5, 7)  # Полные графы лучше с меньшим количеством узлов
+        selected_nodes = all_nodes[:num_nodes]
+
+        graph = {}
+
+        # Создаем все возможные ребра
+        for i in range(len(selected_nodes)):
+            for j in range(i + 1, len(selected_nodes)):
+                weight = random.randint(1, 10)
+                if random.random() < 0.05:  # Меньше отрицательных для полных графов
+                    weight = -random.randint(1, 2)
+                self.add_edge_to_dict(graph, selected_nodes[i], selected_nodes[j], weight)
+
+        return {
+            'graph': graph,
+            'nodes': selected_nodes,
+            'name': 'Полный граф'
+        }
+
+    def generate_tree_graph(self, all_nodes):
+        """Генерирует дерево (связный граф без циклов)"""
+        num_nodes = random.randint(7, 10)
+        selected_nodes = all_nodes[:num_nodes]
+        random.shuffle(selected_nodes)
+
+        graph = {}
+
+        # Создаем дерево с помощью генерации остовного дерева
+        for i in range(1, len(selected_nodes)):
+            parent_index = random.randint(0, i - 1)
+            weight = random.randint(1, 15)
+            self.add_edge_to_dict(graph, selected_nodes[parent_index], selected_nodes[i], weight)
+
+        return {
+            'graph': graph,
+            'nodes': selected_nodes,
+            'name': 'Дерево'
+        }
+
+    def generate_grid_graph(self, all_nodes):
+        """Генерирует решетку (grid)"""
+        # Создаем 3x3 или 4x4 сетку
+        grid_size = random.randint(3, 4)
+        num_nodes = grid_size * grid_size
+        selected_nodes = all_nodes[:num_nodes]
+
+        graph = {}
+
+        # Создаем связи по вертикали и горизонтали
+        for i in range(grid_size):
+            for j in range(grid_size):
+                current = selected_nodes[i * grid_size + j]
+
+                # Связь вправо
+                if j < grid_size - 1:
+                    right = selected_nodes[i * grid_size + j + 1]
+                    weight = random.randint(1, 5)
+                    self.add_edge_to_dict(graph, current, right, weight)
+
+                # Связь вниз
+                if i < grid_size - 1:
+                    down = selected_nodes[(i + 1) * grid_size + j]
+                    weight = random.randint(1, 5)
+                    self.add_edge_to_dict(graph, current, down, weight)
+
+        # Добавляем несколько диагональных связей для сложности
+        for i in range(grid_size - 1):
+            for j in range(grid_size - 1):
+                if random.random() < 0.3:  # 30% вероятность диагонали
+                    current = selected_nodes[i * grid_size + j]
+                    diag = selected_nodes[(i + 1) * grid_size + j + 1]
+                    weight = random.randint(5, 10)
+                    if self.has_edge_in_dict(graph, current, diag):
+                        continue
+                    self.add_edge_to_dict(graph, current, diag, weight)
+
+        return {
+            'graph': graph,
+            'nodes': selected_nodes,
+            'name': 'Решёточный граф'
+        }
+
+    def generate_bipartite_graph(self, all_nodes):
+        """Генерирует двудольный граф"""
+        set1_size = random.randint(3, 5)
+        set2_size = random.randint(3, 5)
+        set1 = all_nodes[:set1_size]
+        set2 = all_nodes[set1_size:set1_size + set2_size]
+        selected_nodes = set1 + set2
+
+        graph = {}
+
+        # Создаем ребра между двумя множествами
+        for u in set1:
+            # Каждый узел из первого множества соединяется с 1-3 узлами из второго
+            connections = random.randint(1, 3)
+            connected_nodes = random.sample(set2, connections)
+            for v in connected_nodes:
+                weight = random.randint(1, 8)
+                if random.random() < 0.05:
+                    weight = -random.randint(1, 2)
+                self.add_edge_to_dict(graph, u, v, weight)
+
+        # Дополнительные ребра для большей связности
+        for u in set1:
+            for v in set2:
+                if not self.has_edge_in_dict(graph, u, v) and random.random() < 0.2:
+                    weight = random.randint(3, 12)
+                    self.add_edge_to_dict(graph, u, v, weight)
+
+        return {
+            'graph': graph,
+            'nodes': selected_nodes,
+            'name': 'Двудольный граф'
+        }
+
+    def generate_star_graph(self, all_nodes):
+        """Генерирует звездчатый граф"""
+        center_node = 'A'
+        num_leaves = random.randint(5, 8)
+        leaf_nodes = all_nodes[1:num_leaves + 1]
+        selected_nodes = [center_node] + leaf_nodes
+
+        graph = {}
+
+        # Центральный узел соединен с каждым листом
+        for leaf in leaf_nodes:
+            weight = random.randint(1, 15)
+            self.add_edge_to_dict(graph, center_node, leaf, weight)
+
+        # Добавляем несколько связей между листами для большей связности
+        for i in range(len(leaf_nodes)):
+            for j in range(i + 1, len(leaf_nodes)):
+                if random.random() < 0.4:  # 40% вероятность связи между листами
+                    weight = random.randint(5, 20)
+                    if not self.has_edge_in_dict(graph, leaf_nodes[i], leaf_nodes[j]):
+                        self.add_edge_to_dict(graph, leaf_nodes[i], leaf_nodes[j], weight)
+
+        return {
+            'graph': graph,
+            'nodes': selected_nodes,
+            'name': 'Звёздчатый граф'
+        }
+
+    def add_edge_to_dict(self, graph, u, v, weight):
+        """Добавляет ребро в словарь графа (вспомогательная функция)"""
+        if u not in graph:
+            graph[u] = {}
+        if v not in graph:
+            graph[v] = {}
+        graph[u][v] = weight
+        if not self.directed:
+            graph[v][u] = weight
+
+    def has_edge_in_dict(self, graph, u, v):
+        """Проверяет наличие ребра в словаре графа (вспомогательная функция)"""
+        return u in graph and v in graph[u]
+
+    def calculate_positions(self, nodes):
+        """Расчет позиций узлов с учетом количества"""
+        self.positions = {}
+
+        if not nodes:
+            return
+
+        center_x, center_y = 400, 300
+        radius = min(350, 30 * len(nodes))
+
+        for i, node in enumerate(nodes):
+            angle = 2 * math.pi * i / len(nodes)
+            self.positions[node] = (
+                center_x + radius * math.cos(angle),
+                center_y + radius * math.sin(angle)
+            )
+
+        self.original_positions = self.positions.copy()
 
     # ==================== ОСНОВНЫЕ МЕТОДЫ АЛГОРИТМОВ ЧЕРЕЗ ПЛАГИНЫ ====================
 
