@@ -642,6 +642,23 @@ class GraphCanvas(QWidget):
                 painter.drawText(25, info_y + 50, result_text)
     
     def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            click_pos = event.position()
+            x, y = click_pos.x(), click_pos.y()
+            clicked_node = self.get_node_at_position(x, y)
+            if clicked_node:
+                if not self.parent.start_node:
+                    self.parent.start_node = clicked_node
+                elif not self.parent.end_node and clicked_node != self.parent.start_node:
+                    self.parent.end_node = clicked_node
+                    self.parent.restart()
+                else:
+                    self.parent.start_node = clicked_node
+                    self.parent.end_node = None
+                self.parent.update_selection_comboboxes()
+                self.update()
+                return
+
         if event.button() == Qt.MiddleButton:
             self.parent.is_panning = True
             self.parent.pan_start_x = event.position().x()
@@ -663,13 +680,24 @@ class GraphCanvas(QWidget):
             self.parent.is_panning = False
             self.setCursor(Qt.ArrowCursor)
     
+    def get_node_at_position(self, x, y):
+        """Определяет узел по позиции клика."""
+        for node, (orig_x, orig_y) in self.parent.positions.items():
+            transformed_x, transformed_y = self.parent.get_transformed_position(orig_x, orig_y)
+            radius = self.parent.get_node_radius()
+            dx = x - transformed_x
+            dy = y - transformed_y
+            if dx * dx + dy * dy <= radius * radius:
+                return node
+        return None
+
     def wheelEvent(self, event):
         delta = event.angleDelta().y()
         if delta > 0:
             self.parent.zoom_level *= 1.1
         else:
             self.parent.zoom_level /= 1.1
-        
+
         self.parent.zoom_level = max(0.1, min(5.0, self.parent.zoom_level))
         self.update()
 
@@ -883,7 +911,13 @@ class ModernGraphVisualizer(QMainWindow):
         
         self.dijkstra_radio = QRadioButton("Дейкстра")
         self.bellman_radio = QRadioButton("Беллман-Форд")
-        self.dijkstra_radio.setChecked(True)
+        self.dijkstra_radio.clicked.connect(self.on_algorithm_changed)
+        self.bellman_radio.clicked.connect(self.on_algorithm_changed)
+
+        # Таймер для автоматических обновлений
+        self.auto_update_timer = QTimer()
+        self.auto_update_timer.timeout.connect(self.auto_update_status)
+        self.auto_update_timer.start(500)  # Обновление каждые 500мс
         
         radio_style = f"""
             QRadioButton {{
@@ -1035,13 +1069,15 @@ class ModernGraphVisualizer(QMainWindow):
         start_layout.addWidget(QLabel("Старт:"))
         self.start_combo = QComboBox()
         self.start_combo.setStyleSheet(self.get_combobox_style())
+        self.start_combo.currentTextChanged.connect(self.on_node_selection_changed)
         start_layout.addWidget(self.start_combo)
         node_layout.addLayout(start_layout)
-        
+
         end_layout = QHBoxLayout()
         end_layout.addWidget(QLabel("Конец:"))
         self.end_combo = QComboBox()
         self.end_combo.setStyleSheet(self.get_combobox_style())
+        self.end_combo.currentTextChanged.connect(self.on_node_selection_changed)
         end_layout.addWidget(self.end_combo)
         node_layout.addLayout(end_layout)
         
@@ -1438,26 +1474,66 @@ class ModernGraphVisualizer(QMainWindow):
         else:
             self.showFullScreen()
 
+    def on_algorithm_changed(self, checked):
+        """Обработчик смены алгоритма"""
+        if checked and self.sender() == self.dijkstra_radio and self.check_negative_weights():
+            QMessageBox.warning(
+                self, "Предупреждение",
+                "Алгоритм Дейкстры не поддерживает отрицательные веса!\n"
+                "Переключено на алгоритм Беллмана-Форда."
+            )
+            self.dijkstra_radio.setChecked(False)
+            self.bellman_radio.setChecked(True)
+            return
+        if checked:
+            self.restart()
+
+    def on_node_selection_changed(self, text):
+        """Обработчик изменения выбора узлов"""
+        start_text = self.start_combo.currentText()
+        end_text = self.end_combo.currentText()
+
+        # Не вызывать если хоть одно значение пустое или пользователь еще не выбрал
+        if not start_text or not end_text:
+            return
+
+        # Не вызывать если значения такие же как текущие выбранные
+        if start_text == self.start_node and end_text == self.end_node:
+            return
+
+        # Не вызывать если значения совпадают
+        if start_text == end_text:
+            return
+
+        # Вызывать только если оба значения корректные и не совпадают
+        self.apply_selection()
+
+    def auto_update_status(self):
+        """Автоматическое обновление состояния интерфейса"""
+        self.update_progress()
+        self.update_results_table()
+        self.canvas_widget.update()
+
     def show_shortcuts_help(self):
         """Показать справку по горячим клавишам"""
         shortcuts = {
             "Пробел": "Пауза/Старт анимации",
-            "Стрелка →": "Шаг вперед", 
+            "Стрелка →": "Шаг вперед",
             "Стрелка ←": "Шаг назад",
             "R": "Перезапуск алгоритма",
             "F": "Полноэкранный режим",
             "+/-": "Увеличить/уменьшить скорость",
             "I": "Сброс масштаба и позиции",
             "G": "Сгенерировать случайный граф",
-            "L": "Загрузить граф из файла", 
+            "L": "Загрузить граф из файла",
             "1/2": "Переключить алгоритм (Дейкстра/Беллман)",
             "H": "Эта справка"
         }
-        
+
         help_text = "Горячие клавиши:\n\n" + "\n".join(
             f"{key}: {desc}" for key, desc in shortcuts.items()
         )
-        
+
         QMessageBox.information(self, "Справка по клавишам", help_text)
 
 
@@ -1569,18 +1645,31 @@ class ModernGraphVisualizer(QMainWindow):
         self.update_selection_comboboxes()
         self.update_weights_table()
 
+        # Установить Дейкстра по умолчанию для графа без отрицательных весов
+        self.dijkstra_radio.setChecked(not self.check_negative_weights())
+        self.bellman_radio.setChecked(self.check_negative_weights())
+
     def update_selection_comboboxes(self):
         if self.positions:
             nodes = list(self.positions.keys())
+
+            # Временно блокируем сигналы чтобы избежать нежелательных срабатываний
+            self.start_combo.blockSignals(True)
+            self.end_combo.blockSignals(True)
+
             self.start_combo.clear()
             self.end_combo.clear()
             self.start_combo.addItems(nodes)
             self.end_combo.addItems(nodes)
-            
+
             if self.start_node:
                 self.start_combo.setCurrentText(self.start_node)
             if self.end_node:
                 self.end_combo.setCurrentText(self.end_node)
+
+            # Восстанавливаем сигналы
+            self.start_combo.blockSignals(False)
+            self.end_combo.blockSignals(False)
 
     def apply_selection(self):
         start = self.start_combo.currentText()
@@ -1920,12 +2009,12 @@ class ModernGraphVisualizer(QMainWindow):
 
     def update_results_table(self):
         self.results_tree.clear()
-        
-        if not hasattr(self, 'distances'):
+
+        if not hasattr(self, 'distances') or not self.distances:
             return
-        
+
         for node in sorted(self.positions.keys()):
-            distance = self.distances[node]
+            distance = self.distances.get(node, float('inf'))
             distance_text = f"{distance:.1f}" if distance != float('inf') else "∞"
             
             path = []
