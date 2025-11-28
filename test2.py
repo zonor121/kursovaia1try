@@ -1113,6 +1113,17 @@ class ModernGraphVisualizer(QMainWindow):
         ])
         generation_layout.addWidget(self.graph_type_combo)
 
+        self.complexity_combo = QComboBox()
+        self.complexity_combo.setStyleSheet(self.get_combobox_style())
+        self.complexity_combo.setFocusPolicy(Qt.NoFocus)
+        self.complexity_combo.addItems([
+            "Лёгкий (4-6 узлов)",
+            "Средний (6-9 узлов)",
+            "Сложный (9-12 узлов)"
+        ])
+        self.complexity_combo.setCurrentText("Средний (6-9 узлов)")  # По умолчанию средний
+        generation_layout.addWidget(self.complexity_combo)
+
         self.random_btn = self.create_styled_button("🎲 Генерировать", self.generate_random_graph)
         generation_layout.addWidget(self.random_btn)
 
@@ -1472,11 +1483,11 @@ class ModernGraphVisualizer(QMainWindow):
         elif key == self.shortcuts['fullscreen']:
             self.toggle_fullscreen()
             event.accept()
-        elif key in (Qt.Key_Plus, Qt.Key_Equal):
-            self.increase_speed()
-            event.accept()
-        elif key == self.shortcuts['decrease_speed']:
+        elif key == Qt.Key_Plus or key == Qt.Key_Equal:
             self.decrease_speed()
+            event.accept()
+        elif key == Qt.Key_Minus:
+            self.increase_speed()
             event.accept()
         elif key == self.shortcuts['reset_view']:
             self.reset_view()
@@ -1924,7 +1935,13 @@ class ModernGraphVisualizer(QMainWindow):
 
     def generate_connected_graph(self, all_nodes):
         """Генерирует связный случайный граф"""
-        num_nodes = random.randint(6, 8)
+        complexity = self.complexity_combo.currentText()
+        if complexity == "Лёгкий (4-6 узлов)":
+            num_nodes = random.randint(4, 6)
+        elif complexity == "Средний (6-9 узлов)":
+            num_nodes = random.randint(6, 9)
+        else:  # Сложный (9-12 узлов)
+            num_nodes = random.randint(9, 12)
         selected_nodes = all_nodes[:num_nodes]
 
         graph = {}
@@ -1955,7 +1972,13 @@ class ModernGraphVisualizer(QMainWindow):
 
     def generate_complete_graph(self, all_nodes):
         """Генерирует полный граф (все возможные ребра)"""
-        num_nodes = random.randint(5, 7)  # Полные графы лучше с меньшим количеством узлов
+        complexity = self.complexity_combo.currentText()
+        if complexity == "Лёгкий (4-6 узлов)":
+            num_nodes = random.randint(3, 5)  # Легкий полный граф
+        elif complexity == "Средний (6-9 узлов)":
+            num_nodes = random.randint(5, 7)
+        else:  # Сложный (9-12 узлов)
+            num_nodes = random.randint(6, 8)  # Не слишком большой для полных графов
         selected_nodes = all_nodes[:num_nodes]
 
         graph = {}
@@ -1976,7 +1999,13 @@ class ModernGraphVisualizer(QMainWindow):
 
     def generate_tree_graph(self, all_nodes):
         """Генерирует дерево (связный граф без циклов)"""
-        num_nodes = random.randint(7, 10)
+        complexity = self.complexity_combo.currentText()
+        if complexity == "Лёгкий (4-6 узлов)":
+            num_nodes = random.randint(4, 6)
+        elif complexity == "Средний (6-9 узлов)":
+            num_nodes = random.randint(7, 9)
+        else:  # Сложный (9-12 узлов)
+            num_nodes = random.randint(10, 12)
         selected_nodes = all_nodes[:num_nodes]
         random.shuffle(selected_nodes)
 
@@ -1986,6 +2015,8 @@ class ModernGraphVisualizer(QMainWindow):
         for i in range(1, len(selected_nodes)):
             parent_index = random.randint(0, i - 1)
             weight = random.randint(1, 15)
+            if complexity == "Сложный (9-12 узлов)" and random.random() < 0.1:
+                weight = -random.randint(1, 2)
             self.add_edge_to_dict(graph, selected_nodes[parent_index], selected_nodes[i], weight)
 
         return {
@@ -1996,40 +2027,58 @@ class ModernGraphVisualizer(QMainWindow):
 
     def generate_grid_graph(self, all_nodes):
         """Генерирует решетку (grid)"""
-        # Создаем 3x3 или 4x4 сетку
-        grid_size = random.randint(3, 4)
+        complexity = self.complexity_combo.currentText()
+        if complexity == "Лёгкий (4-6 узлов)":
+            grid_size = 2  # 4 узла максимум для легкого
+        elif complexity == "Средний (6-9 узлов)":
+            grid_size = 3  # 9 узлов
+        else:  # Сложный (9-12 узлов)
+            grid_size = 4  # 16 узлов - такой размер будет сложным
+
         num_nodes = grid_size * grid_size
+        # Убедимся, что у нас достаточно узлов
+        num_nodes = min(num_nodes, len(all_nodes))
         selected_nodes = all_nodes[:num_nodes]
+
+        # Для слишком большого количества узлов возьмем только первые
+        grid_size = int(num_nodes ** 0.5)
 
         graph = {}
 
         # Создаем связи по вертикали и горизонтали
         for i in range(grid_size):
             for j in range(grid_size):
+                if i * grid_size + j >= num_nodes:
+                    break
                 current = selected_nodes[i * grid_size + j]
 
                 # Связь вправо
-                if j < grid_size - 1:
+                if j < grid_size - 1 and i * grid_size + j + 1 < num_nodes:
                     right = selected_nodes[i * grid_size + j + 1]
                     weight = random.randint(1, 5)
                     self.add_edge_to_dict(graph, current, right, weight)
 
                 # Связь вниз
-                if i < grid_size - 1:
+                if i < grid_size - 1 and (i + 1) * grid_size + j < num_nodes:
                     down = selected_nodes[(i + 1) * grid_size + j]
                     weight = random.randint(1, 5)
                     self.add_edge_to_dict(graph, current, down, weight)
 
-        # Добавляем несколько диагональных связей для сложности
+        # Добавляем диагональные связи для большей сложности (больше диагоналей для сложных)
+        diagonal_chance = 0.2 if complexity == "Лёгкий (4-6 узлов)" else 0.4
         for i in range(grid_size - 1):
             for j in range(grid_size - 1):
-                if random.random() < 0.3:  # 30% вероятность диагонали
+                if i * grid_size + j >= num_nodes or i * grid_size + j + 1 >= num_nodes:
+                    continue
+                if (i + 1) * grid_size + j + 1 >= num_nodes:
+                    continue
+
+                if random.random() < diagonal_chance:
                     current = selected_nodes[i * grid_size + j]
                     diag = selected_nodes[(i + 1) * grid_size + j + 1]
                     weight = random.randint(5, 10)
-                    if self.has_edge_in_dict(graph, current, diag):
-                        continue
-                    self.add_edge_to_dict(graph, current, diag, weight)
+                    if not self.has_edge_in_dict(graph, current, diag):
+                        self.add_edge_to_dict(graph, current, diag, weight)
 
         return {
             'graph': graph,
@@ -2039,8 +2088,17 @@ class ModernGraphVisualizer(QMainWindow):
 
     def generate_bipartite_graph(self, all_nodes):
         """Генерирует двудольный граф"""
-        set1_size = random.randint(3, 5)
-        set2_size = random.randint(3, 5)
+        complexity = self.complexity_combo.currentText()
+        if complexity == "Лёгкий (4-6 узлов)":
+            set1_size = random.randint(2, 3)
+            set2_size = random.randint(2, 3)
+        elif complexity == "Средний (6-9 узлов)":
+            set1_size = random.randint(3, 4)
+            set2_size = random.randint(3, 5)
+        else:  # Сложный (9-12 узлов)
+            set1_size = random.randint(4, 6)
+            set2_size = random.randint(4, 6)
+
         set1 = all_nodes[:set1_size]
         set2 = all_nodes[set1_size:set1_size + set2_size]
         selected_nodes = set1 + set2
@@ -2051,18 +2109,24 @@ class ModernGraphVisualizer(QMainWindow):
         for u in set1:
             # Каждый узел из первого множества соединяется с 1-3 узлами из второго
             connections = random.randint(1, 3)
-            connected_nodes = random.sample(set2, connections)
-            for v in connected_nodes:
-                weight = random.randint(1, 8)
-                if random.random() < 0.05:
-                    weight = -random.randint(1, 2)
-                self.add_edge_to_dict(graph, u, v, weight)
+            if len(set2) < connections:
+                connections = len(set2)
+            if connections > 0:
+                connected_nodes = random.sample(set2, connections)
+                for v in connected_nodes:
+                    weight = random.randint(1, 8)
+                    if random.random() < 0.05:
+                        weight = -random.randint(1, 2)
+                    self.add_edge_to_dict(graph, u, v, weight)
 
-        # Дополнительные ребра для большей связности
+        # Дополнительные ребра для большей связности (больше связности для сложных)
+        extra_chance = 0.15 if complexity == "Лёгкий (4-6 узлов)" else 0.25
         for u in set1:
             for v in set2:
-                if not self.has_edge_in_dict(graph, u, v) and random.random() < 0.2:
+                if not self.has_edge_in_dict(graph, u, v) and random.random() < extra_chance:
                     weight = random.randint(3, 12)
+                    if complexity == "Сложный (9-12 узлов)" and random.random() < 0.1:
+                        weight = -random.randint(1, 3)
                     self.add_edge_to_dict(graph, u, v, weight)
 
         return {
@@ -2074,7 +2138,14 @@ class ModernGraphVisualizer(QMainWindow):
     def generate_star_graph(self, all_nodes):
         """Генерирует звездчатый граф"""
         center_node = 'A'
-        num_leaves = random.randint(5, 8)
+        complexity = self.complexity_combo.currentText()
+        if complexity == "Лёгкий (4-6 узлов)":
+            num_leaves = random.randint(3, 5)  # Всего 4-6 узлов
+        elif complexity == "Средний (6-9 узлов)":
+            num_leaves = random.randint(5, 8)  # Всего 6-9 узлов
+        else:  # Сложный (9-12 узлов)
+            num_leaves = random.randint(8, 11)  # Всего 9-12 узлов
+
         leaf_nodes = all_nodes[1:num_leaves + 1]
         selected_nodes = [center_node] + leaf_nodes
 
@@ -2083,13 +2154,18 @@ class ModernGraphVisualizer(QMainWindow):
         # Центральный узел соединен с каждым листом
         for leaf in leaf_nodes:
             weight = random.randint(1, 15)
+            if complexity == "Сложный (9-12 узлов)" and random.random() < 0.1:
+                weight = -random.randint(1, 3)
             self.add_edge_to_dict(graph, center_node, leaf, weight)
 
-        # Добавляем несколько связей между листами для большей связности
+        # Добавляем связи между листами для большей связности (больше связности для сложных)
+        leaf_connection_chance = 0.2 if complexity == "Лёгкий (4-6 узлов)" else 0.4
         for i in range(len(leaf_nodes)):
             for j in range(i + 1, len(leaf_nodes)):
-                if random.random() < 0.4:  # 40% вероятность связи между листами
+                if random.random() < leaf_connection_chance:
                     weight = random.randint(5, 20)
+                    if complexity == "Сложный (9-12 узлов)" and random.random() < 0.1:
+                        weight = -random.randint(1, 2)
                     if not self.has_edge_in_dict(graph, leaf_nodes[i], leaf_nodes[j]):
                         self.add_edge_to_dict(graph, leaf_nodes[i], leaf_nodes[j], weight)
 
