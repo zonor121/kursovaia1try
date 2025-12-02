@@ -7,10 +7,10 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QComboBox, QRadioButton, QGroupBox,
     QFileDialog, QMessageBox, QTreeWidget, QTreeWidgetItem,
     QSlider, QSplitter, QFrame, QProgressBar, QButtonGroup,
-    QGraphicsBlurEffect, QHeaderView, QDialogButtonBox, QDialog, QTableWidget, QTableWidgetItem
+    QGraphicsBlurEffect, QHeaderView
 )
-from PySide6.QtCore import Qt, QTimer, QRect, QSettings 
-from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QFont, QPalette, QLinearGradient, QRadialGradient, QKeySequence
+from PySide6.QtCore import Qt, QTimer, QRect, QPointF 
+from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QFont, QPalette, QLinearGradient, QRadialGradient, QKeySequence, QPolygonF
 
 
 # ==================== БАЗОВЫЙ КЛАСС АЛГОРИТМА ====================
@@ -99,15 +99,16 @@ class DijkstraPlugin(ShortestPathAlgorithm):
         
         # Обрабатываем соседей
         updates = []
-        for (u, v), weight in self.graph.items():
-            if u == self.current_node and v not in self.visited:
-                new_distance = current_distance + weight
-                if new_distance < self.distances[v]:
-                    old_distance = self.distances[v]
-                    self.distances[v] = new_distance
-                    self.previous[v] = self.current_node
-                    heapq.heappush(self.queue, (new_distance, v))
-                    updates.append((v, old_distance, new_distance))
+        for neighbor, weight in self.graph.get(self.current_node, {}).items():
+            if neighbor in self.visited:
+                continue
+            new_distance = current_distance + weight
+            if new_distance < self.distances[neighbor]:
+                old_distance = self.distances[neighbor]
+                self.distances[neighbor] = new_distance
+                self.previous[neighbor] = self.current_node
+                heapq.heappush(self.queue, (new_distance, neighbor))
+                updates.append((neighbor, old_distance, new_distance))
         
         # Проверяем завершение
         if self.current_node == self.end_node or not self.queue:
@@ -203,8 +204,9 @@ class BellmanFordPlugin(ShortestPathAlgorithm):
         
         # Создаем список ребер
         self.edges = []
-        for (u, v), weight in graph.items():
-            self.edges.append((u, v, weight))
+        for u, neighbors in graph.items():
+            for v, weight in neighbors.items():
+                self.edges.append((u, v, weight))
         
         return self.get_current_state(f"Инициализация: |V| = {len(positions)}, |E| = {len(self.edges)}")
         
@@ -375,6 +377,7 @@ class GraphCanvas(QWidget):
         self.parent = parent
         self.setMinimumSize(800, 600)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.StrongFocus)  # Получать фокус клавиатуры
         
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -390,8 +393,10 @@ class GraphCanvas(QWidget):
             painter.end()
             return
         
-        self.draw_edges(painter)
+        arrow_data = self.draw_edges(painter)
         self.draw_nodes(painter)
+        if self.parent.directed:
+            self.draw_arrows(painter, arrow_data)
         self.draw_legend(painter)
         
         painter.end()
@@ -451,18 +456,21 @@ class GraphCanvas(QWidget):
         painter.drawLine(0, center_y, self.width(), center_y)
         
     def draw_edges(self, painter):
-        drawn_edges = set()
-        
-        for (u, v), weight in self.parent.graph.items():
-            edge_key = tuple(sorted([u, v]))
-            if edge_key in drawn_edges:
-                continue
-                
-            drawn_edges.add(edge_key)
-            
+        arrows = []
+        for u, v, weight in self.parent.iter_unique_edges():
             if u in self.parent.positions and v in self.parent.positions:
                 x1, y1 = self.parent.get_transformed_position(*self.parent.positions[u])
                 x2, y2 = self.parent.get_transformed_position(*self.parent.positions[v])
+                dx = x2 - x1
+                dy = y2 - y1
+                length = math.hypot(dx, dy)
+                if length == 0:
+                    continue
+                end_x, end_y = x2, y2
+                if self.parent.directed:
+                    node_radius = self.parent.get_node_radius()
+                    end_x = x2 - (dx / length) * node_radius
+                    end_y = y2 - (dy / length) * node_radius
                 
                 pen = QPen()
                 if weight < 0:
@@ -478,7 +486,36 @@ class GraphCanvas(QWidget):
                     pen.setWidth(2)
                 
                 painter.setPen(pen)
-                painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+                painter.drawLine(int(x1), int(y1), int(end_x), int(end_y))
+                
+                if self.parent.directed:
+                    arrows.append((x1, y1, end_x, end_y, QColor(pen.color())))
+        return arrows
+
+    def draw_arrows(self, painter, arrows):
+        for x1, y1, end_x, end_y, color in arrows:
+            self.draw_arrow_head(painter, x1, y1, end_x, end_y, color)
+
+    def draw_arrow_head(self, painter, x1, y1, x2, y2, color):
+        """Рисует стрелку на конце ребра для ориентированных графов."""
+        angle = math.atan2(y2 - y1, x2 - x1)
+        arrow_length = max(12, 14 * self.parent.zoom_level)
+        arrow_width = max(6, 8 * self.parent.zoom_level)
+        
+        point1 = QPointF(x2, y2)
+        point2 = QPointF(
+            x2 - arrow_length * math.cos(angle - math.pi / 8),
+            y2 - arrow_length * math.sin(angle - math.pi / 8)
+        )
+        point3 = QPointF(
+            x2 - arrow_length * math.cos(angle + math.pi / 8),
+            y2 - arrow_length * math.sin(angle + math.pi / 8)
+        )
+        
+        polygon = QPolygonF([point1, point2, point3])
+        painter.setBrush(QColor(color))
+        painter.setPen(Qt.NoPen)
+        painter.drawPolygon(polygon)
     
     def draw_nodes(self, painter):
         for node, (orig_x, orig_y) in self.parent.positions.items():
@@ -495,7 +532,7 @@ class GraphCanvas(QWidget):
                               30, 30)
             
             # Основной узел с градиентом
-            radius = max(15, int(20 * self.parent.zoom_level))
+            radius = self.parent.get_node_radius()
             gradient = QRadialGradient(x, y, radius)
             gradient.setColorAt(0, QColor(color).lighter(150))
             gradient.setColorAt(0.7, QColor(color))
@@ -556,6 +593,8 @@ class GraphCanvas(QWidget):
             ("Финиш", "#F44336"),
             ("Не посещенный", self.parent.current_theme['text_secondary'])
         ]
+        if self.parent.directed:
+            legend_items.append(("Направление (стрелка)", self.parent.current_theme['text']))
         
         painter.setFont(QFont("Arial", 10, QFont.Bold))
         
@@ -603,6 +642,23 @@ class GraphCanvas(QWidget):
                 painter.drawText(25, info_y + 50, result_text)
     
     def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            click_pos = event.position()
+            x, y = click_pos.x(), click_pos.y()
+            clicked_node = self.get_node_at_position(x, y)
+            if clicked_node:
+                if not self.parent.start_node:
+                    self.parent.start_node = clicked_node
+                elif not self.parent.end_node and clicked_node != self.parent.start_node:
+                    self.parent.end_node = clicked_node
+                    self.parent.restart()
+                else:
+                    self.parent.start_node = clicked_node
+                    self.parent.end_node = None
+                self.parent.update_selection_comboboxes()
+                self.update()
+                return
+
         if event.button() == Qt.MiddleButton:
             self.parent.is_panning = True
             self.parent.pan_start_x = event.position().x()
@@ -624,13 +680,28 @@ class GraphCanvas(QWidget):
             self.parent.is_panning = False
             self.setCursor(Qt.ArrowCursor)
     
+    def get_node_at_position(self, x, y):
+        """Определяет узел по позиции клика."""
+        for node, (orig_x, orig_y) in self.parent.positions.items():
+            transformed_x, transformed_y = self.parent.get_transformed_position(orig_x, orig_y)
+            radius = self.parent.get_node_radius()
+            dx = x - transformed_x
+            dy = y - transformed_y
+            if dx * dx + dy * dy <= radius * radius:
+                return node
+        return None
+
+    def keyPressEvent(self, event):
+        """Перенаправляем обработку клавиш на главное окно"""
+        self.parent.keyPressEvent(event)
+
     def wheelEvent(self, event):
         delta = event.angleDelta().y()
         if delta > 0:
             self.parent.zoom_level *= 1.1
         else:
             self.parent.zoom_level /= 1.1
-        
+
         self.parent.zoom_level = max(0.1, min(5.0, self.parent.zoom_level))
         self.update()
 
@@ -648,6 +719,7 @@ class ModernGraphVisualizer(QMainWindow):
         
         # Данные графа
         self.graph = {}
+        self.directed = False
         self.positions = {}
         self.original_positions = {}
         self.start_node = None
@@ -682,66 +754,12 @@ class ModernGraphVisualizer(QMainWindow):
         self.initialize_default_graph()
         self.initialize_algorithm()
         self.setup_shortcuts()
-        self.setup_shortcuts_button()
 
-    def setup_shortcuts_button(self):
-        self.settings_btn = QPushButton("⚙️ Настройки клавиш")
-        self.settings_btn.setStyleSheet("""
-            QPushButton {
-                background: #bb86fc;
-                color: black;
-                border: none;
-                padding: 5px 10px;
-                border-radius: 3px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: #9d65d5;
-            }
-        """)
-        self.settings_btn.clicked.connect(self.show_shortcuts_dialog)
-
-    def show_shortcuts_dialog(self):
-        dialog = ShortcutsDialog(self, self.shortcuts, self.default_shortcuts)
-        dialog.exec()
+        # Устанавливаем фокус на холст для обработки клавиатурных команд
+        self.activateWindow()
+        self.raise_()
+        QTimer.singleShot(100, lambda: self.canvas_widget.setFocus())
     
-    def show_shortcuts_help(self):
-        help_text = "Текущие горячие клавиши:\n\n"
-        
-        key_names = {
-            'pause': 'Пауза/Старт',
-            'step_forward': 'Шаг вперед', 
-            'step_backward': 'Шаг назад',
-            'restart': 'Перезапуск',
-            'fullscreen': 'Полный экран',
-            'increase_speed': 'Увеличить скорость',
-            'decrease_speed': 'Уменьшить скорость', 
-            'reset_view': 'Сброс вида',
-            'generate_graph': 'Случайный граф',
-            'load_graph': 'Загрузить граф',
-            'algorithm_1': 'Алгоритм 1 (Дейкстра)',
-            'algorithm_2': 'Алгоритм 2 (Беллман-Форд)',
-            'help': 'Справка'
-        }
-        
-        for action, key in self.shortcuts.items():
-            if key != 0:  # Пропускаем очищенные клавиши
-                key_name = QKeySequence(key).toString()
-                help_text += f"{key_names[action]}: {key_name}\n"
-        
-        help_text += "\n⚙️ Нажмите 'Настройки клавиш' для изменения"
-        
-        msg = QMessageBox(self)
-        msg.setWindowTitle("Горячие клавиши")
-        msg.setText(help_text)
-        
-        # Добавляем кнопку настроек в сообщение
-        settings_btn = msg.addButton("⚙️ Настройки клавиш", QMessageBox.ActionRole)
-        settings_btn.clicked.connect(self.show_shortcuts_dialog)
-        
-        msg.addButton(QMessageBox.Ok)
-        msg.exec()
-
     def setup_themes(self):
         self.themes = {
             'dark': {
@@ -818,12 +836,12 @@ class ModernGraphVisualizer(QMainWindow):
         layout.setSpacing(2)
 
         # Вертикальный сплиттер для верхней панели и основной области
-        main_splitter = QSplitter(Qt.Vertical)
-        layout.addWidget(main_splitter)
+        self.main_splitter = QSplitter(Qt.Vertical)
+        layout.addWidget(self.main_splitter)
 
         # Верхняя панель управления
         self.top_panel = self.create_top_panel()
-        main_splitter.addWidget(self.top_panel)
+        self.main_splitter.addWidget(self.top_panel)
 
         # Основная область с графом и правой панелью
         main_area_widget = QWidget()
@@ -845,18 +863,19 @@ class ModernGraphVisualizer(QMainWindow):
         content_splitter.setSizes([1000, 400])
         main_area_layout.addWidget(content_splitter)
 
-        main_splitter.addWidget(main_area_widget)
+        self.main_splitter.addWidget(main_area_widget)
         
         # Настройка пропорций основного сплиттера
-        main_splitter.setSizes([120, 780])
-        main_splitter.setChildrenCollapsible(False)
+        self.main_splitter.setSizes([120, 780])
+        self.main_splitter.setCollapsible(0, True)
+        self.main_splitter.setCollapsible(1, False)
 
         # Нижняя панель статуса
         self.create_status_bar()
 
     def create_top_panel(self):
         top_frame = QFrame()
-        top_frame.setMinimumHeight(80)
+        top_frame.setMinimumHeight(0)
         top_frame.setMaximumHeight(200)
         top_frame.setStyleSheet(f"""
             QFrame {{
@@ -901,7 +920,13 @@ class ModernGraphVisualizer(QMainWindow):
         
         self.dijkstra_radio = QRadioButton("Дейкстра")
         self.bellman_radio = QRadioButton("Беллман-Форд")
-        self.dijkstra_radio.setChecked(True)
+        self.dijkstra_radio.clicked.connect(self.on_algorithm_changed)
+        self.bellman_radio.clicked.connect(self.on_algorithm_changed)
+
+        # Таймер для автоматических обновлений
+        self.auto_update_timer = QTimer()
+        self.auto_update_timer.timeout.connect(self.auto_update_status)
+        self.auto_update_timer.start(500)  # Обновление каждые 500мс
         
         radio_style = f"""
             QRadioButton {{
@@ -963,15 +988,10 @@ class ModernGraphVisualizer(QMainWindow):
         
         file_layout = QHBoxLayout()
         file_layout.setSpacing(6)
-        
+
         self.load_btn = self.create_styled_button("📁 Загрузить", self.load_graph_from_file)
-        self.random_btn = self.create_styled_button("🎲 Случайный", self.generate_random_graph)
-        self.settings_btn = self.create_styled_button("⚙️ Настройки", self.show_shortcuts_dialog)
-        
         file_layout.addWidget(self.load_btn)
-        file_layout.addWidget(self.random_btn)
-        file_layout.addWidget(self.settings_btn)
-        
+
         top_layout.addLayout(file_layout)
         
         return top_frame
@@ -1006,6 +1026,7 @@ class ModernGraphVisualizer(QMainWindow):
                 color: {self.current_theme['text_secondary']};
             }}
         """)
+        btn.setFocusPolicy(Qt.NoFocus)
         btn.clicked.connect(callback)
         return btn
 
@@ -1043,6 +1064,9 @@ class ModernGraphVisualizer(QMainWindow):
         right_layout = QVBoxLayout(right_widget)
         right_layout.setSpacing(10)
         
+        graph_type_group = self.create_graph_type_group()
+        right_layout.addWidget(graph_type_group)
+        
         # Группа выбора узлов
         node_group = QGroupBox("Выбор узлов")
         node_group.setStyleSheet(self.get_groupbox_style())
@@ -1052,13 +1076,17 @@ class ModernGraphVisualizer(QMainWindow):
         start_layout.addWidget(QLabel("Старт:"))
         self.start_combo = QComboBox()
         self.start_combo.setStyleSheet(self.get_combobox_style())
+        self.start_combo.setFocusPolicy(Qt.NoFocus)
+        self.start_combo.currentTextChanged.connect(self.on_node_selection_changed)
         start_layout.addWidget(self.start_combo)
         node_layout.addLayout(start_layout)
-        
+
         end_layout = QHBoxLayout()
         end_layout.addWidget(QLabel("Конец:"))
         self.end_combo = QComboBox()
         self.end_combo.setStyleSheet(self.get_combobox_style())
+        self.end_combo.setFocusPolicy(Qt.NoFocus)
+        self.end_combo.currentTextChanged.connect(self.on_node_selection_changed)
         end_layout.addWidget(self.end_combo)
         node_layout.addLayout(end_layout)
         
@@ -1067,13 +1095,47 @@ class ModernGraphVisualizer(QMainWindow):
         
         right_layout.addWidget(node_group)
         
+        # Группа генерации
+        generation_group = QGroupBox("Генерация графа")
+        generation_group.setStyleSheet(self.get_groupbox_style())
+        generation_layout = QVBoxLayout(generation_group)
+
+        self.graph_type_combo = QComboBox()
+        self.graph_type_combo.setStyleSheet(self.get_combobox_style())
+        self.graph_type_combo.setFocusPolicy(Qt.NoFocus)
+        self.graph_type_combo.addItems([
+            "Связный случайный",
+            "Полный граф",
+            "Дерево",
+            "Решётка",
+            "Двудольный",
+            "Звёздчатый"
+        ])
+        generation_layout.addWidget(self.graph_type_combo)
+
+        self.complexity_combo = QComboBox()
+        self.complexity_combo.setStyleSheet(self.get_combobox_style())
+        self.complexity_combo.setFocusPolicy(Qt.NoFocus)
+        self.complexity_combo.addItems([
+            "Лёгкий (4-6 узлов)",
+            "Средний (6-9 узлов)",
+            "Сложный (9-12 узлов)"
+        ])
+        self.complexity_combo.setCurrentText("Средний (6-9 узлов)")  # По умолчанию средний
+        generation_layout.addWidget(self.complexity_combo)
+
+        self.random_btn = self.create_styled_button("🎲 Генерировать", self.generate_random_graph)
+        generation_layout.addWidget(self.random_btn)
+
+        right_layout.addWidget(generation_group)
+
         # Группа скорости
         speed_group = QGroupBox("Скорость анимации")
         speed_group.setStyleSheet(self.get_groupbox_style())
         speed_layout = QVBoxLayout(speed_group)
         speed_layout.setContentsMargins(10, 12, 10, 12)
         speed_layout.setSpacing(8)
-        
+
         self.speed_slider = QSlider(Qt.Horizontal)
         self.speed_slider.setRange(0, 5)
         self.speed_slider.setValue(2)
@@ -1081,11 +1143,11 @@ class ModernGraphVisualizer(QMainWindow):
         self.speed_slider.setStyleSheet(self.get_slider_style())
         self.speed_slider.setMinimumHeight(25)
         speed_layout.addWidget(self.speed_slider)
-        
+
         self.speed_label = QLabel("Средняя скорость")
         self.speed_label.setStyleSheet(f"color: {self.current_theme['text']}; font-size: 10px; padding: 3px;")
         speed_layout.addWidget(self.speed_label)
-        
+
         right_layout.addWidget(speed_group)
         
         # Прогресс выполнения
@@ -1200,22 +1262,68 @@ class ModernGraphVisualizer(QMainWindow):
         
         return right_widget
 
+    def create_graph_type_group(self):
+        group = QGroupBox("Тип графа")
+        group.setStyleSheet(self.get_groupbox_style())
+        layout = QHBoxLayout(group)
+        layout.setSpacing(10)
+        
+        self.undirected_radio = QRadioButton("Неориентированный")
+        self.directed_radio = QRadioButton("Ориентированный")
+        self.undirected_radio.setChecked(not self.directed)
+        self.directed_radio.setChecked(self.directed)
+        
+        radio_style = f"""
+            QRadioButton {{
+                color: {self.current_theme['text']};
+                font-size: 12px;
+                padding: 4px;
+            }}
+        """
+        self.undirected_radio.setStyleSheet(radio_style)
+        self.directed_radio.setStyleSheet(radio_style)
+        
+        self.undirected_radio.toggled.connect(self.on_graph_type_toggled)
+        self.directed_radio.toggled.connect(self.on_graph_type_toggled)
+        
+        layout.addWidget(self.undirected_radio)
+        layout.addWidget(self.directed_radio)
+        layout.addStretch()
+        
+        info_label = QLabel("Применяется при загрузке/генерации графа")
+        info_label.setStyleSheet(f"color: {self.current_theme['text_secondary']}; font-size: 10px;")
+        layout.addWidget(info_label)
+        
+        return group
+
+    def on_graph_type_toggled(self):
+        new_directed = self.directed_radio.isChecked()
+        if new_directed == self.directed:
+            return
+        self.directed = new_directed
+        mode = "ориентированный" if self.directed else "неориентированный"
+        self.status_label.setText(f"Тип графа: {mode}. Перезагрузите или сгенерируйте граф для применения.")
+        self.update_weights_table()
+        self.canvas_widget.update()
+
+    def update_graph_type_controls(self):
+        if hasattr(self, 'directed_radio'):
+            self.directed_radio.blockSignals(True)
+            self.undirected_radio.blockSignals(True)
+            self.directed_radio.setChecked(self.directed)
+            self.undirected_radio.setChecked(not self.directed)
+            self.directed_radio.blockSignals(False)
+            self.undirected_radio.blockSignals(False)
+
     def update_weights_table(self):
         self.weights_tree.clear()
         
         if not self.graph:
             return
         
-        drawn_edges = set()
-        
-        for (u, v), weight in self.graph.items():
-            edge_key = tuple(sorted([u, v]))
-            if edge_key in drawn_edges:
-                continue
-                
-            drawn_edges.add(edge_key)
-            
-            edge_text = f"{u} - {v}"
+        edge_symbol = "→" if self.directed else "-"
+        for u, v, weight in self.iter_unique_edges():
+            edge_text = f"{u} {edge_symbol} {v}"
             weight_text = str(weight)
             
             item = QTreeWidgetItem([edge_text, weight_text])
@@ -1225,6 +1333,45 @@ class ModernGraphVisualizer(QMainWindow):
                 item.setForeground(1, QColor('white'))
             
             self.weights_tree.addTopLevelItem(item)
+
+    def iter_unique_edges(self):
+        """Возвращает рёбра для отображения/подсчёта."""
+        if self.directed:
+            for u, neighbors in self.graph.items():
+                for v, weight in neighbors.items():
+                    yield u, v, weight
+            return
+        
+        seen = set()
+        for u, neighbors in self.graph.items():
+            for v, weight in neighbors.items():
+                edge_key = tuple(sorted((u, v)))
+                if edge_key in seen:
+                    continue
+                seen.add(edge_key)
+                yield u, v, weight
+
+    def add_edge(self, u, v, weight, bidirectional=None):
+        """Добавляет ребро в список смежности."""
+        if bidirectional is None:
+            bidirectional = not self.directed
+        self.graph.setdefault(u, {})
+        self.graph.setdefault(v, {})
+        self.graph[u][v] = weight
+        if bidirectional:
+            self.graph[v][u] = weight
+
+    def has_edge(self, u, v):
+        return u in self.graph and v in self.graph[u]
+
+    def get_all_nodes(self):
+        nodes = set(self.graph.keys())
+        for neighbors in self.graph.values():
+            nodes.update(neighbors.keys())
+        return nodes
+
+    def get_edge_count(self):
+        return sum(1 for _ in self.iter_unique_edges())
 
     def get_groupbox_style(self):
         return f"""
@@ -1275,12 +1422,12 @@ class ModernGraphVisualizer(QMainWindow):
         # Стандартные клавиши по умолчанию
         self.default_shortcuts = {
             'pause': Qt.Key_Space,
-            'step_forward': Qt.Key_Right, 
+            'step_forward': Qt.Key_Right,
             'step_backward': Qt.Key_Left,
             'restart': Qt.Key_R,
             'fullscreen': Qt.Key_F,
-            'increase_speed': Qt.Key_Plus,
-            'decrease_speed': Qt.Key_Minus,
+            'increase_speed': Qt.Key_Minus,  # Поменяли местами: "-" увеличивает скорость
+            'decrease_speed': Qt.Key_Plus,  # "+" уменьшает скорость
             'reset_view': Qt.Key_I,
             'generate_graph': Qt.Key_G,
             'load_graph': Qt.Key_L,
@@ -1288,84 +1435,78 @@ class ModernGraphVisualizer(QMainWindow):
             'algorithm_2': Qt.Key_2,
             'help': Qt.Key_H
         }
-        
-        # Загружаем настройки пользователя
+
         self.shortcuts = self.default_shortcuts.copy()
 
-        for action, key in self.shortcuts.items():
-            print(f"{action}: {key} ({QKeySequence(key).toString()})")
+        # Устанавливаем QShortcut для надежного перехвата клавиш
+        from PySide6.QtGui import QShortcut, QKeySequence
 
-    def load_shortcuts(self):
-        settings = QSettings("GraphVisualizer", "Shortcuts")
-        shortcuts = {}
-        
-        for action, default_key in self.default_shortcuts.items():
-            # Загружаем значение или используем значение по умолчанию
-            key_value = settings.value(f"shortcuts/{action}", defaultValue=default_key)
-            shortcuts[action] = int(key_value)
-        
-        return shortcuts
+        QShortcut(QKeySequence("Space"), self, self.toggle_pause)
+        QShortcut(QKeySequence("Right"), self, self.step_forward)
+        QShortcut(QKeySequence("Left"), self, self.step_backward)
+        QShortcut(QKeySequence("R"), self, self.restart)
+        QShortcut(QKeySequence("F"), self, self.toggle_fullscreen)
+        QShortcut(QKeySequence("="), self, self.decrease_speed)  # "+" уменьшает скорость
+        QShortcut(QKeySequence("-"), self, self.increase_speed)  # "-" увеличивает скорость
+        QShortcut(QKeySequence("I"), self, self.reset_view)
+        QShortcut(QKeySequence("G"), self, self.generate_random_graph)
+        QShortcut(QKeySequence("L"), self, self.load_graph_from_file)
+        QShortcut(QKeySequence("1"), self, lambda: self.set_algorithm(1))
+        QShortcut(QKeySequence("2"), self, lambda: self.set_algorithm(2))
+        QShortcut(QKeySequence("H"), self, self.show_shortcuts_help)
+        QShortcut(QKeySequence("Escape"), self, lambda: self.showNormal() if self.isFullScreen() else None)
 
-    def save_shortcuts(self, shortcuts=None):
-        """Сохраняет горячие клавиши в настройки"""
-        if shortcuts is None:
-            shortcuts = self.shortcuts
-            
-        settings = QSettings("GraphVisualizer", "Shortcuts")
-        
-        for action, key in shortcuts.items():
-            settings.setValue(f"shortcuts/{action}", key)
-        
-        settings.sync()  # Принудительно сохраняем
-
-    def reset_shortcuts_to_default(self):
-        """Сбрасывает горячие клавиши к значениям по умолчанию"""
-        self.shortcuts = self.default_shortcuts.copy()
-        self.save_shortcuts()
+    def set_algorithm(self, algorithm_num):
+        """Установка алгоритма по номеру"""
+        if algorithm_num == 1:
+            self.dijkstra_radio.setChecked(True)
+            self.restart()
+        elif algorithm_num == 2:
+            self.bellman_radio.setChecked(True)
+            self.restart()
 
     def keyPressEvent(self, event):
         key = event.key()
         
-        # Перехватываем ВСЕ нужные клавиши и явно принимаем событие
-        if key == Qt.Key_Space:
+        if key == self.shortcuts['pause']:
             self.toggle_pause()
             event.accept()
-        elif key == Qt.Key_Right:
+        elif key == self.shortcuts['step_forward']:
             self.step_forward()
             event.accept()
-        elif key == Qt.Key_Left:
+        elif key == self.shortcuts['step_backward']:
             self.step_backward()
             event.accept()
-        elif key == Qt.Key_R:
+        elif key == self.shortcuts['restart']:
             self.restart()
             event.accept()
-        elif key == Qt.Key_F:
+        elif key == self.shortcuts['fullscreen']:
             self.toggle_fullscreen()
             event.accept()
         elif key == Qt.Key_Plus or key == Qt.Key_Equal:
-            self.increase_speed()
-            event.accept()
-        elif key == Qt.Key_Minus:
             self.decrease_speed()
             event.accept()
-        elif key == Qt.Key_I:
+        elif key == Qt.Key_Minus:
+            self.increase_speed()
+            event.accept()
+        elif key == self.shortcuts['reset_view']:
             self.reset_view()
             event.accept()
-        elif key == Qt.Key_G:
+        elif key == self.shortcuts['generate_graph']:
             self.generate_random_graph()
             event.accept()
-        elif key == Qt.Key_L:
+        elif key == self.shortcuts['load_graph']:
             self.load_graph_from_file()
             event.accept()
-        elif key == Qt.Key_1:
+        elif key == self.shortcuts['algorithm_1']:
             self.dijkstra_radio.setChecked(True)
             self.restart()
             event.accept()
-        elif key == Qt.Key_2:
+        elif key == self.shortcuts['algorithm_2']:
             self.bellman_radio.setChecked(True)
             self.restart()
             event.accept()
-        elif key == Qt.Key_H:
+        elif key == self.shortcuts['help']:
             self.show_shortcuts_help()
             event.accept()
         elif key == Qt.Key_Escape:
@@ -1375,7 +1516,6 @@ class ModernGraphVisualizer(QMainWindow):
             else:
                 super().keyPressEvent(event)
         else:
-            # Все остальные клавиши передаем стандартной обработке
             super().keyPressEvent(event)
 
     def increase_speed(self):
@@ -1404,26 +1544,66 @@ class ModernGraphVisualizer(QMainWindow):
         else:
             self.showFullScreen()
 
+    def on_algorithm_changed(self, checked):
+        """Обработчик смены алгоритма"""
+        if checked and self.sender() == self.dijkstra_radio and self.check_negative_weights():
+            QMessageBox.warning(
+                self, "Предупреждение",
+                "Алгоритм Дейкстры не поддерживает отрицательные веса!\n"
+                "Переключено на алгоритм Беллмана-Форда."
+            )
+            self.dijkstra_radio.setChecked(False)
+            self.bellman_radio.setChecked(True)
+            return
+        if checked:
+            self.restart()
+
+    def on_node_selection_changed(self, text):
+        """Обработчик изменения выбора узлов"""
+        start_text = self.start_combo.currentText()
+        end_text = self.end_combo.currentText()
+
+        # Не вызывать если хоть одно значение пустое или пользователь еще не выбрал
+        if not start_text or not end_text:
+            return
+
+        # Не вызывать если значения такие же как текущие выбранные
+        if start_text == self.start_node and end_text == self.end_node:
+            return
+
+        # Не вызывать если значения совпадают
+        if start_text == end_text:
+            return
+
+        # Вызывать только если оба значения корректные и не совпадают
+        self.apply_selection()
+
+    def auto_update_status(self):
+        """Автоматическое обновление состояния интерфейса"""
+        self.update_progress()
+        self.update_results_table()
+        self.canvas_widget.update()
+
     def show_shortcuts_help(self):
         """Показать справку по горячим клавишам"""
         shortcuts = {
             "Пробел": "Пауза/Старт анимации",
-            "Стрелка →": "Шаг вперед", 
+            "Стрелка →": "Шаг вперед",
             "Стрелка ←": "Шаг назад",
             "R": "Перезапуск алгоритма",
             "F": "Полноэкранный режим",
             "+/-": "Увеличить/уменьшить скорость",
             "I": "Сброс масштаба и позиции",
             "G": "Сгенерировать случайный граф",
-            "L": "Загрузить граф из файла", 
+            "L": "Загрузить граф из файла",
             "1/2": "Переключить алгоритм (Дейкстра/Беллман)",
             "H": "Эта справка"
         }
-        
+
         help_text = "Горячие клавиши:\n\n" + "\n".join(
             f"{key}: {desc}" for key, desc in shortcuts.items()
         )
-        
+
         QMessageBox.information(self, "Справка по клавишам", help_text)
 
 
@@ -1479,6 +1659,9 @@ class ModernGraphVisualizer(QMainWindow):
             return self.current_theme['success']
         return self.current_theme['text_secondary']
 
+    def get_node_radius(self):
+        return max(15, int(20 * self.zoom_level))
+
     def get_transformed_position(self, x, y):
         center_x, center_y = self.canvas_widget.width() // 2, self.canvas_widget.height() // 2
         transformed_x = center_x + (x - center_x + self.pan_offset_x) * self.zoom_level
@@ -1506,8 +1689,7 @@ class ModernGraphVisualizer(QMainWindow):
         
         self.graph = {}
         for u, v, weight in edges:
-            self.graph[(u, v)] = weight
-            self.graph[(v, u)] = weight
+            self.add_edge(u, v, weight)
         
         center_x, center_y = 400, 300
         
@@ -1533,18 +1715,31 @@ class ModernGraphVisualizer(QMainWindow):
         self.update_selection_comboboxes()
         self.update_weights_table()
 
+        # Установить Дейкстра по умолчанию для графа без отрицательных весов
+        self.dijkstra_radio.setChecked(not self.check_negative_weights())
+        self.bellman_radio.setChecked(self.check_negative_weights())
+
     def update_selection_comboboxes(self):
         if self.positions:
             nodes = list(self.positions.keys())
+
+            # Временно блокируем сигналы чтобы избежать нежелательных срабатываний
+            self.start_combo.blockSignals(True)
+            self.end_combo.blockSignals(True)
+
             self.start_combo.clear()
             self.end_combo.clear()
             self.start_combo.addItems(nodes)
             self.end_combo.addItems(nodes)
-            
+
             if self.start_node:
                 self.start_combo.setCurrentText(self.start_node)
             if self.end_node:
                 self.end_combo.setCurrentText(self.end_node)
+
+            # Восстанавливаем сигналы
+            self.start_combo.blockSignals(False)
+            self.end_combo.blockSignals(False)
 
     def apply_selection(self):
         start = self.start_combo.currentText()
@@ -1563,7 +1758,11 @@ class ModernGraphVisualizer(QMainWindow):
         self.restart()
 
     def check_negative_weights(self):
-        return any(weight < 0 for weight in self.graph.values())
+        for neighbors in self.graph.values():
+            for weight in neighbors.values():
+                if weight < 0:
+                    return True
+        return False
 
     def load_graph_from_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1581,16 +1780,25 @@ class ModernGraphVisualizer(QMainWindow):
             edges = []
             start_node = None
             end_node = None
+            file_directed = None
             
             for line in lines:
                 line = line.strip()
                 if not line or line.startswith('#'):
                     continue
                 
-                if line.upper().startswith('START'):
+                upper_line = line.upper()
+                if upper_line == 'DIRECTED':
+                    file_directed = True
+                    continue
+                elif upper_line == 'UNDIRECTED':
+                    file_directed = False
+                    continue
+                
+                if upper_line.startswith('START'):
                     start_node = line.split()[1]
                     continue
-                elif line.upper().startswith('END'):
+                elif upper_line.startswith('END'):
                     end_node = line.split()[1]
                     continue
                 
@@ -1607,10 +1815,18 @@ class ModernGraphVisualizer(QMainWindow):
                 QMessageBox.critical(self, "Ошибка", "Файл не содержит корректных ребер графа")
                 return
             
+            if file_directed is not None:
+                self.directed = file_directed
+                self.update_graph_type_controls()
+            
             self.graph = {}
             for u, v, weight in edges:
-                self.graph[(u, v)] = weight
-                self.graph[(v, u)] = weight
+                self.add_edge(u, v, weight)
+            
+            if start_node:
+                self.graph.setdefault(start_node, {})
+            if end_node:
+                self.graph.setdefault(end_node, {})
             
             self.calculate_positions()
             
@@ -1634,7 +1850,13 @@ class ModernGraphVisualizer(QMainWindow):
             self.restart()
             self.update_weights_table()
             
-            message_text = f"Граф загружен!\nРебер: {len(edges)}\nУзлов: {len(self.positions)}\nСтарт: {self.start_node}, Конец: {self.end_node}"
+            graph_type = "ориентированный" if self.directed else "неориентированный"
+            message_text = (
+                f"Граф загружен ({graph_type})!\n"
+                f"Ребер: {self.get_edge_count()}\n"
+                f"Узлов: {len(self.positions)}\n"
+                f"Старт: {self.start_node}, Конец: {self.end_node}"
+            )
             if has_negative:
                 message_text += f"\n⚠️ Обнаружены отрицательные веса!"
             
@@ -1644,8 +1866,11 @@ class ModernGraphVisualizer(QMainWindow):
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл:\n{str(e)}")
 
     def calculate_positions(self):
-        nodes = list(set([node for edge in self.graph.keys() for node in edge]))
+        nodes = list(self.get_all_nodes())
         self.positions = {}
+        
+        if not nodes:
+            return
         
         center_x, center_y = 400, 300
         radius = min(300, 40 * len(nodes))
@@ -1660,48 +1885,328 @@ class ModernGraphVisualizer(QMainWindow):
         self.original_positions = self.positions.copy()
 
     def generate_random_graph(self):
-        nodes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
-        num_nodes = random.randint(6, 8)
-        selected_nodes = nodes[:num_nodes]
-        
-        self.graph = {}
-        
-        for i in range(len(selected_nodes) - 1):
-            u = selected_nodes[i]
-            v = selected_nodes[i + 1]
-            weight = random.randint(1, 10)
-            self.graph[(u, v)] = weight
-            self.graph[(v, u)] = weight
-        
-        num_extra_edges = random.randint(num_nodes, num_nodes + 3)
-        for _ in range(num_extra_edges):
-            u = random.choice(selected_nodes)
-            v = random.choice(selected_nodes)
-            if u != v and (u, v) not in self.graph:
-                weight = random.randint(1, 10)
-                if random.random() < 0.1:
-                    weight = -random.randint(1, 3)
-                self.graph[(u, v)] = weight
-                self.graph[(v, u)] = weight
-        
-        self.calculate_positions()
+        """Генерирует случайный граф выбранного типа"""
+        graph_type = self.graph_type_combo.currentText()
+
+        # Доступные узлы
+        all_nodes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O']
+
+        # Генерируем соответствующий тип графа
+        if graph_type == "Связный случайный":
+            generated = self.generate_connected_graph(all_nodes)
+        elif graph_type == "Полный граф":
+            generated = self.generate_complete_graph(all_nodes)
+        elif graph_type == "Дерево":
+            generated = self.generate_tree_graph(all_nodes)
+        elif graph_type == "Решётка":
+            generated = self.generate_grid_graph(all_nodes)
+        elif graph_type == "Двудольный":
+            generated = self.generate_bipartite_graph(all_nodes)
+        elif graph_type == "Звёздчатый":
+            generated = self.generate_star_graph(all_nodes)
+        else:
+            # По умолчанию связный
+            generated = self.generate_connected_graph(all_nodes)
+
+        self.graph = generated['graph']
+        selected_nodes = generated['nodes']
+        graph_name = generated['name']
+
+        self.calculate_positions(selected_nodes)
+
         self.start_node = random.choice(selected_nodes)
         self.end_node = random.choice([n for n in selected_nodes if n != self.start_node])
         self.original_positions = self.positions.copy()
         self.update_selection_comboboxes()
-        
+
         has_negative = self.check_negative_weights()
         if has_negative and self.dijkstra_radio.isChecked():
             self.bellman_radio.setChecked(True)
-        
+
         self.restart()
         self.update_weights_table()
-        
-        QMessageBox.information(self, "Случайный граф", 
-                               f"Сгенерирован случайный граф!\n"
+
+        is_directed = "ориентированный" if self.directed else "неориентированный"
+        QMessageBox.information(self, f"Сгенерирован {graph_name}",
+                               f"Тип: {graph_name} ({is_directed})\n"
                                f"Узлов: {len(selected_nodes)}\n"
-                               f"Ребер: {len(self.graph)//2}\n"
+                               f"Ребер: {self.get_edge_count()}\n"
                                f"Старт: {self.start_node}, Конец: {self.end_node}")
+
+    def generate_connected_graph(self, all_nodes):
+        """Генерирует связный случайный граф"""
+        complexity = self.complexity_combo.currentText()
+        if complexity == "Лёгкий (4-6 узлов)":
+            num_nodes = random.randint(4, 6)
+        elif complexity == "Средний (6-9 узлов)":
+            num_nodes = random.randint(6, 9)
+        else:  # Сложный (9-12 узлов)
+            num_nodes = random.randint(9, 12)
+        selected_nodes = all_nodes[:num_nodes]
+
+        graph = {}
+
+        # Создаем связный остов
+        for i in range(len(selected_nodes) - 1):
+            u = selected_nodes[i]
+            v = selected_nodes[i + 1]
+            weight = random.randint(1, 10)
+            self.add_edge_to_dict(graph, u, v, weight)
+
+        # Добавляем дополнительные ребра
+        num_extra_edges = random.randint(num_nodes, num_nodes + 3)
+        for _ in range(num_extra_edges):
+            u = random.choice(selected_nodes)
+            v = random.choice(selected_nodes)
+            if u != v and not self.has_edge_in_dict(graph, u, v):
+                weight = random.randint(1, 10)
+                if random.random() < 0.1:  # 10% отрицательных весов
+                    weight = -random.randint(1, 3)
+                self.add_edge_to_dict(graph, u, v, weight)
+
+        return {
+            'graph': graph,
+            'nodes': selected_nodes,
+            'name': 'Связный случайный граф'
+        }
+
+    def generate_complete_graph(self, all_nodes):
+        """Генерирует полный граф (все возможные ребра)"""
+        complexity = self.complexity_combo.currentText()
+        if complexity == "Лёгкий (4-6 узлов)":
+            num_nodes = random.randint(3, 5)  # Легкий полный граф
+        elif complexity == "Средний (6-9 узлов)":
+            num_nodes = random.randint(5, 7)
+        else:  # Сложный (9-12 узлов)
+            num_nodes = random.randint(6, 8)  # Не слишком большой для полных графов
+        selected_nodes = all_nodes[:num_nodes]
+
+        graph = {}
+
+        # Создаем все возможные ребра
+        for i in range(len(selected_nodes)):
+            for j in range(i + 1, len(selected_nodes)):
+                weight = random.randint(1, 10)
+                if random.random() < 0.05:  # Меньше отрицательных для полных графов
+                    weight = -random.randint(1, 2)
+                self.add_edge_to_dict(graph, selected_nodes[i], selected_nodes[j], weight)
+
+        return {
+            'graph': graph,
+            'nodes': selected_nodes,
+            'name': 'Полный граф'
+        }
+
+    def generate_tree_graph(self, all_nodes):
+        """Генерирует дерево (связный граф без циклов)"""
+        complexity = self.complexity_combo.currentText()
+        if complexity == "Лёгкий (4-6 узлов)":
+            num_nodes = random.randint(4, 6)
+        elif complexity == "Средний (6-9 узлов)":
+            num_nodes = random.randint(7, 9)
+        else:  # Сложный (9-12 узлов)
+            num_nodes = random.randint(10, 12)
+        selected_nodes = all_nodes[:num_nodes]
+        random.shuffle(selected_nodes)
+
+        graph = {}
+
+        # Создаем дерево с помощью генерации остовного дерева
+        for i in range(1, len(selected_nodes)):
+            parent_index = random.randint(0, i - 1)
+            weight = random.randint(1, 15)
+            if complexity == "Сложный (9-12 узлов)" and random.random() < 0.1:
+                weight = -random.randint(1, 2)
+            self.add_edge_to_dict(graph, selected_nodes[parent_index], selected_nodes[i], weight)
+
+        return {
+            'graph': graph,
+            'nodes': selected_nodes,
+            'name': 'Дерево'
+        }
+
+    def generate_grid_graph(self, all_nodes):
+        """Генерирует решетку (grid)"""
+        complexity = self.complexity_combo.currentText()
+        if complexity == "Лёгкий (4-6 узлов)":
+            grid_size = 2  # 4 узла максимум для легкого
+        elif complexity == "Средний (6-9 узлов)":
+            grid_size = 3  # 9 узлов
+        else:  # Сложный (9-12 узлов)
+            grid_size = 4  # 16 узлов - такой размер будет сложным
+
+        num_nodes = grid_size * grid_size
+        # Убедимся, что у нас достаточно узлов
+        num_nodes = min(num_nodes, len(all_nodes))
+        selected_nodes = all_nodes[:num_nodes]
+
+        # Для слишком большого количества узлов возьмем только первые
+        grid_size = int(num_nodes ** 0.5)
+
+        graph = {}
+
+        # Создаем связи по вертикали и горизонтали
+        for i in range(grid_size):
+            for j in range(grid_size):
+                if i * grid_size + j >= num_nodes:
+                    break
+                current = selected_nodes[i * grid_size + j]
+
+                # Связь вправо
+                if j < grid_size - 1 and i * grid_size + j + 1 < num_nodes:
+                    right = selected_nodes[i * grid_size + j + 1]
+                    weight = random.randint(1, 5)
+                    self.add_edge_to_dict(graph, current, right, weight)
+
+                # Связь вниз
+                if i < grid_size - 1 and (i + 1) * grid_size + j < num_nodes:
+                    down = selected_nodes[(i + 1) * grid_size + j]
+                    weight = random.randint(1, 5)
+                    self.add_edge_to_dict(graph, current, down, weight)
+
+        # Добавляем диагональные связи для большей сложности (больше диагоналей для сложных)
+        diagonal_chance = 0.2 if complexity == "Лёгкий (4-6 узлов)" else 0.4
+        for i in range(grid_size - 1):
+            for j in range(grid_size - 1):
+                if i * grid_size + j >= num_nodes or i * grid_size + j + 1 >= num_nodes:
+                    continue
+                if (i + 1) * grid_size + j + 1 >= num_nodes:
+                    continue
+
+                if random.random() < diagonal_chance:
+                    current = selected_nodes[i * grid_size + j]
+                    diag = selected_nodes[(i + 1) * grid_size + j + 1]
+                    weight = random.randint(5, 10)
+                    if not self.has_edge_in_dict(graph, current, diag):
+                        self.add_edge_to_dict(graph, current, diag, weight)
+
+        return {
+            'graph': graph,
+            'nodes': selected_nodes,
+            'name': 'Решёточный граф'
+        }
+
+    def generate_bipartite_graph(self, all_nodes):
+        """Генерирует двудольный граф"""
+        complexity = self.complexity_combo.currentText()
+        if complexity == "Лёгкий (4-6 узлов)":
+            set1_size = random.randint(2, 3)
+            set2_size = random.randint(2, 3)
+        elif complexity == "Средний (6-9 узлов)":
+            set1_size = random.randint(3, 4)
+            set2_size = random.randint(3, 5)
+        else:  # Сложный (9-12 узлов)
+            set1_size = random.randint(4, 6)
+            set2_size = random.randint(4, 6)
+
+        set1 = all_nodes[:set1_size]
+        set2 = all_nodes[set1_size:set1_size + set2_size]
+        selected_nodes = set1 + set2
+
+        graph = {}
+
+        # Создаем ребра между двумя множествами
+        for u in set1:
+            # Каждый узел из первого множества соединяется с 1-3 узлами из второго
+            connections = random.randint(1, 3)
+            if len(set2) < connections:
+                connections = len(set2)
+            if connections > 0:
+                connected_nodes = random.sample(set2, connections)
+                for v in connected_nodes:
+                    weight = random.randint(1, 8)
+                    if random.random() < 0.05:
+                        weight = -random.randint(1, 2)
+                    self.add_edge_to_dict(graph, u, v, weight)
+
+        # Дополнительные ребра для большей связности (больше связности для сложных)
+        extra_chance = 0.15 if complexity == "Лёгкий (4-6 узлов)" else 0.25
+        for u in set1:
+            for v in set2:
+                if not self.has_edge_in_dict(graph, u, v) and random.random() < extra_chance:
+                    weight = random.randint(3, 12)
+                    if complexity == "Сложный (9-12 узлов)" and random.random() < 0.1:
+                        weight = -random.randint(1, 3)
+                    self.add_edge_to_dict(graph, u, v, weight)
+
+        return {
+            'graph': graph,
+            'nodes': selected_nodes,
+            'name': 'Двудольный граф'
+        }
+
+    def generate_star_graph(self, all_nodes):
+        """Генерирует звездчатый граф"""
+        center_node = 'A'
+        complexity = self.complexity_combo.currentText()
+        if complexity == "Лёгкий (4-6 узлов)":
+            num_leaves = random.randint(3, 5)  # Всего 4-6 узлов
+        elif complexity == "Средний (6-9 узлов)":
+            num_leaves = random.randint(5, 8)  # Всего 6-9 узлов
+        else:  # Сложный (9-12 узлов)
+            num_leaves = random.randint(8, 11)  # Всего 9-12 узлов
+
+        leaf_nodes = all_nodes[1:num_leaves + 1]
+        selected_nodes = [center_node] + leaf_nodes
+
+        graph = {}
+
+        # Центральный узел соединен с каждым листом
+        for leaf in leaf_nodes:
+            weight = random.randint(1, 15)
+            if complexity == "Сложный (9-12 узлов)" and random.random() < 0.1:
+                weight = -random.randint(1, 3)
+            self.add_edge_to_dict(graph, center_node, leaf, weight)
+
+        # Добавляем связи между листами для большей связности (больше связности для сложных)
+        leaf_connection_chance = 0.2 if complexity == "Лёгкий (4-6 узлов)" else 0.4
+        for i in range(len(leaf_nodes)):
+            for j in range(i + 1, len(leaf_nodes)):
+                if random.random() < leaf_connection_chance:
+                    weight = random.randint(5, 20)
+                    if complexity == "Сложный (9-12 узлов)" and random.random() < 0.1:
+                        weight = -random.randint(1, 2)
+                    if not self.has_edge_in_dict(graph, leaf_nodes[i], leaf_nodes[j]):
+                        self.add_edge_to_dict(graph, leaf_nodes[i], leaf_nodes[j], weight)
+
+        return {
+            'graph': graph,
+            'nodes': selected_nodes,
+            'name': 'Звёздчатый граф'
+        }
+
+    def add_edge_to_dict(self, graph, u, v, weight):
+        """Добавляет ребро в словарь графа (вспомогательная функция)"""
+        if u not in graph:
+            graph[u] = {}
+        if v not in graph:
+            graph[v] = {}
+        graph[u][v] = weight
+        if not self.directed:
+            graph[v][u] = weight
+
+    def has_edge_in_dict(self, graph, u, v):
+        """Проверяет наличие ребра в словаре графа (вспомогательная функция)"""
+        return u in graph and v in graph[u]
+
+    def calculate_positions(self, nodes):
+        """Расчет позиций узлов с учетом количества"""
+        self.positions = {}
+
+        if not nodes:
+            return
+
+        center_x, center_y = 400, 300
+        radius = min(350, 30 * len(nodes))
+
+        for i, node in enumerate(nodes):
+            angle = 2 * math.pi * i / len(nodes)
+            self.positions[node] = (
+                center_x + radius * math.cos(angle),
+                center_y + radius * math.sin(angle)
+            )
+
+        self.original_positions = self.positions.copy()
 
     # ==================== ОСНОВНЫЕ МЕТОДЫ АЛГОРИТМОВ ЧЕРЕЗ ПЛАГИНЫ ====================
 
@@ -1777,24 +2282,6 @@ class ModernGraphVisualizer(QMainWindow):
             self.update_results_table()
             self.canvas_widget.update()
 
-    def save_state(self, description=""):
-        state = {
-            'distances': self.distances.copy(),
-            'visited': self.visited.copy(),
-            'previous': self.previous.copy(),
-            'current_node': self.current_node,
-            'final_path': self.final_path.copy() if self.final_path else None,
-            'algorithm_finished': self.algorithm_finished,
-            'algorithm_result': self.algorithm_result,
-            'description': description
-        }
-    
-            # Ключевое исправление: обрезаем историю ТОЛЬКО если мы не в середине
-        if self.current_history_index < len(self.history) - 1:
-            self.history = self.history[:self.current_history_index + 1]
-    
-        self.history.append(state)
-        self.current_history_index = len(self.history) - 1
     def restore_state(self):
         state = self.history[self.current_history_index]
         self.distances = state['distances'].copy()
@@ -1873,12 +2360,12 @@ class ModernGraphVisualizer(QMainWindow):
 
     def update_results_table(self):
         self.results_tree.clear()
-        
-        if not hasattr(self, 'distances'):
+
+        if not hasattr(self, 'distances') or not self.distances:
             return
-        
+
         for node in sorted(self.positions.keys()):
-            distance = self.distances[node]
+            distance = self.distances.get(node, float('inf'))
             distance_text = f"{distance:.1f}" if distance != float('inf') else "∞"
             
             path = []
@@ -1907,263 +2394,12 @@ class ModernGraphVisualizer(QMainWindow):
             elif node in self.visited:
                 item.setBackground(0, QColor(self.current_theme['accent']))
 
-class KeyInputDialog(QDialog):
-    def __init__(self, parent, action_name):
-        super().__init__(parent)
-        self.selected_key = None
-        self.setup_ui(action_name)
-        
-    def setup_ui(self, action_name):
-        self.setWindowTitle("Назначение клавиши")
-        self.setModal(True)
-        self.setFixedSize(400, 200)
-        
-        layout = QVBoxLayout()
-        
-        # Инструкция
-        instruction = QLabel(f"Нажмите клавишу для действия:\n{action_name}")
-        instruction.setStyleSheet("font-size: 14px; font-weight: bold; padding: 10px;")
-        instruction.setAlignment(Qt.AlignCenter)
-        layout.addWidget(instruction)
-        
-        # Отображение нажатой клавиши
-        self.key_label = QLabel("Нажмите любую клавишу...")
-        self.key_label.setStyleSheet("font-size: 16px; color: #bb86fc; padding: 20px;")
-        self.key_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.key_label)
-        
-        # Кнопки
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.on_accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-        
-        self.setLayout(layout)
-    
-    def on_accept(self):
-        """Проверяем что клавиша выбрана перед принятием"""
-        if self.selected_key is not None:
-            self.accept()
-        else:
-            QMessageBox.warning(self, "Ошибка", "Сначала нажмите клавишу!")
-    
-    def keyPressEvent(self, event):
-        key = event.key()
-        modifier = event.modifiers()
-        
-        # Игнорируем одиночные модификаторы
-        if key in [Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta]:
-            return
-            
-        # Esc - отмена
-        if key == Qt.Key_Escape:
-            self.reject()
-            return
-        
-        # Enter - подтверждение (если уже есть выбранная клавиша)
-        if key == Qt.Key_Return or key == Qt.Key_Enter:
-            if self.selected_key is not None:
-                self.accept()
-            return
-        
-        # Создаем QKeySequence
-        if modifier and key:
-            key_sequence = QKeySequence(modifier + key)
-        else:
-            key_sequence = QKeySequence(key)
-            
-        self.selected_key = key
-        self.key_label.setText(f"Выбрана клавиша: {key_sequence.toString()}")
-        event.accept()
-
-
-class ShortcutsDialog(QDialog):
-    def __init__(self, parent, shortcuts, default_shortcuts):
-        super().__init__(parent)
-        self.parent = parent
-        self.shortcuts = shortcuts.copy()
-        self.default_shortcuts = default_shortcuts
-        self.setup_ui()
-        
-    def setup_ui(self):
-        self.setWindowTitle("Настройка горячих клавиш")
-        self.setMinimumSize(600, 700)
-        self.setModal(True)
-        
-        layout = QVBoxLayout()
-        
-        # Заголовок
-        title = QLabel("Настройка горячих клавиш")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; padding: 10px;")
-        layout.addWidget(title)
-        
-        # Инструкция
-        instruction = QLabel("Нажмите 'Изменить' для выбора новой клавиши")
-        instruction.setStyleSheet("color: #bb86fc; padding: 5px;")
-        instruction.setWordWrap(True)
-        layout.addWidget(instruction)
-        
-        # Таблица горячих клавиш
-        self.table = QTableWidget()
-        self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(["Действие", "Горячая клавиша", "Действие"])
-        self.table.horizontalHeader().setStretchLastSection(False)
-        self.table.setColumnWidth(0, 250)  # Действие
-        self.table.setColumnWidth(1, 150)  # Клавиша
-        self.table.setColumnWidth(2, 100)  # Кнопка
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.verticalHeader().setVisible(False)
-        
-        self.populate_table()
-        layout.addWidget(self.table)
-        
-        # Кнопки управления
-        button_layout = QHBoxLayout()
-        
-        self.reset_btn = QPushButton("Сбросить к стандартным")
-        self.reset_btn.clicked.connect(self.reset_to_default)
-        
-        button_layout.addWidget(self.reset_btn)
-        button_layout.addStretch()
-        
-        layout.addLayout(button_layout)
-        
-        # Кнопки OK/Отмена
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.save_and_close)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-        
-        self.setLayout(layout)
-        
-    def populate_table(self):
-        action_names = {
-            'pause': 'Пауза/Старт анимации',
-            'step_forward': 'Шаг вперед', 
-            'step_backward': 'Шаг назад',
-            'restart': 'Перезапуск алгоритма',
-            'fullscreen': 'Полноэкранный режим',
-            'increase_speed': 'Увеличить скорость',
-            'decrease_speed': 'Уменьшить скорость',
-            'reset_view': 'Сброс масштаба и позиции',
-            'generate_graph': 'Сгенерировать случайный граф',
-            'load_graph': 'Загрузить граф из файла',
-            'algorithm_1': 'Алгоритм Дейкстры',
-            'algorithm_2': 'Алгоритм Беллмана-Форда',
-            'help': 'Показать справку'
-        }
-        
-        self.table.setRowCount(len(self.shortcuts))
-        
-        for row, (action, key) in enumerate(self.shortcuts.items()):
-            # Действие
-            action_item = QTableWidgetItem(action_names.get(action, action))
-            action_item.setData(Qt.UserRole, action)
-            action_item.setFlags(action_item.flags() & ~Qt.ItemIsEditable)
-            
-            # Клавиша
-            key_text = QKeySequence(key).toString() if key != 0 else "Не назначено"
-            key_item = QTableWidgetItem(key_text)
-            key_item.setData(Qt.UserRole, key)
-            key_item.setFlags(key_item.flags() & ~Qt.ItemIsEditable)
-            
-            # Кнопка "Изменить"
-            change_btn = QPushButton("Изменить")
-            change_btn.clicked.connect(lambda checked, r=row: self.change_shortcut(r))
-            
-            self.table.setItem(row, 0, action_item)
-            self.table.setItem(row, 1, key_item)
-            self.table.setCellWidget(row, 2, change_btn)
-            
-        self.table.resizeColumnsToContents()
-    
-    def change_shortcut(self, row):
-        """Запускает процесс изменения клавиши для указанной строки"""
-        action_item = self.table.item(row, 0)
-        action = action_item.data(Qt.UserRole)
-        action_name = self.get_action_name(action)
-        
-        # Показываем диалог ввода новой клавиши
-        dialog = KeyInputDialog(self, action_name)
-        if dialog.exec() == QDialog.Accepted and dialog.selected_key is not None:
-            new_key = dialog.selected_key
-            
-            # Проверяем конфликт
-            conflict_action = self.find_key_conflict(new_key, action)
-            if conflict_action and new_key != 0:
-                conflict_name = self.get_action_name(conflict_action)
-                reply = QMessageBox.question(
-                    self, 
-                    "Конфликт клавиш", 
-                    f"Клавиша {QKeySequence(new_key).toString()} уже назначена на '{conflict_name}'. Заменить?",
-                    QMessageBox.Yes | QMessageBox.No
-                )
-                if reply == QMessageBox.No:
-                    return
-                # Если Yes - удаляем старое назначение
-                self.shortcuts[conflict_action] = 0
-            
-            # Назначаем новую клавишу
-            self.shortcuts[action] = new_key
-            self.update_table_row(action)
-    
-    def find_key_conflict(self, key, current_action):
-        """Находит конфликт для клавиши (кроме текущего действия)"""
-        if key == 0:
-            return None
-            
-        for action, action_key in self.shortcuts.items():
-            if action != current_action and action_key == key:
-                return action
-        return None
-    
-    def update_table_row(self, action):
-        """Обновляет строку в таблице для указанного действия"""
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, 0)
-            if item and item.data(Qt.UserRole) == action:
-                key = self.shortcuts[action]
-                key_text = QKeySequence(key).toString() if key != 0 else "Не назначено"
-                self.table.item(row, 1).setText(key_text)
-                self.table.item(row, 1).setData(Qt.UserRole, key)
-                break
-            
-    def reset_to_default(self):
-        reply = QMessageBox.question(self, "Сброс настроек", 
-                                   "Вернуть все горячие клавиши к значениям по умолчанию?",
-                                   QMessageBox.Yes | QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            self.shortcuts = self.default_shortcuts.copy()
-            # Обновляем все строки таблицы
-            for action in self.shortcuts.keys():
-                self.update_table_row(action)
-            
-    def save_and_close(self):
-        self.accept()
-        
-    def get_action_name(self, action):
-        names = {
-            'pause': 'Пауза/Старт анимации',
-            'step_forward': 'Шаг вперед', 
-            'step_backward': 'Шаг назад',
-            'restart': 'Перезапуск алгоритма',
-            'fullscreen': 'Полноэкранный режим',
-            'increase_speed': 'Увеличить скорость',
-            'decrease_speed': 'Уменьшить скорость',
-            'reset_view': 'Сброс масштаба и позиции',
-            'generate_graph': 'Сгенерировать случайный граф',
-            'load_graph': 'Загрузить граф из файла',
-            'algorithm_1': 'Алгоритм Дейкстры',
-            'algorithm_2': 'Алгоритм Беллмана-Форда',
-            'help': 'Показать справку'
-        }
-        return names.get(action, action)
-
 def main():
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
     window = ModernGraphVisualizer()
     window.show()
+    window.setFocus()  # Устанавливаем фокус на окно для работы клавиш
     sys.exit(app.exec())
 
 
