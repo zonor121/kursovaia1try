@@ -895,7 +895,11 @@ class ModernGraphVisualizer(QMainWindow):
         top_layout.addWidget(header_widget)
         
         top_layout.addStretch(1)
-        
+
+        # Группа типа графа
+        graph_type_group = self.create_graph_type_group()
+        top_layout.addWidget(graph_type_group)
+
         algo_group = QGroupBox("Выбор алгоритма")
         algo_group.setStyleSheet(f"""
             QGroupBox {{
@@ -1063,10 +1067,7 @@ class ModernGraphVisualizer(QMainWindow):
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setSpacing(10)
-        
-        graph_type_group = self.create_graph_type_group()
-        right_layout.addWidget(graph_type_group)
-        
+
         # Группа выбора узлов
         node_group = QGroupBox("Выбор узлов")
         node_group.setStyleSheet(self.get_groupbox_style())
@@ -1289,10 +1290,6 @@ class ModernGraphVisualizer(QMainWindow):
         layout.addWidget(self.undirected_radio)
         layout.addWidget(self.directed_radio)
         layout.addStretch()
-        
-        info_label = QLabel("Применяется при загрузке/генерации графа")
-        info_label.setStyleSheet(f"color: {self.current_theme['text_secondary']}; font-size: 10px;")
-        layout.addWidget(info_label)
         
         return group
 

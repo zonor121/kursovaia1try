@@ -1291,10 +1291,6 @@ class ModernGraphVisualizer(QMainWindow):
         layout.addWidget(self.directed_radio)
         layout.addStretch()
         
-        info_label = QLabel("Применяется при загрузке/генерации графа")
-        info_label.setStyleSheet(f"color: {self.current_theme['text_secondary']}; font-size: 10px;")
-        layout.addWidget(info_label)
-        
         return group
 
     def on_graph_type_toggled(self):
