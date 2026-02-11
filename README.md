@@ -112,10 +112,3 @@ kursovaia1try/
 
 ## 📝 Автор
 Богатенков А.В.
-
----
-
-pip install pyinstaller
-pyinstaller --onefile --windowed --name "GraphVisualizer" test2.py
-python -m PyInstaller --onefile --windowed test2.py (Если не видит библиотеку)
-Запускать лучше через python "название программы.py"
